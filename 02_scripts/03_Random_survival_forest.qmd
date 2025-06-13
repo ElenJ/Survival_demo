@@ -1,0 +1,121 @@
+---
+title: "03_Random Survival Forest"
+format: html
+editor: visual
+---
+
+## Random Survival Forest Demo
+
+```{r}
+library(randomForestSRC)
+```
+
+
+## Dataset and Problem
+
+H. Ishwaran, M. S. Lauer, E. H. Blackstone, M. Lu, and U. B. Kogalur. 2021. “randomForestSRC: random survival forests vignette.”
+
+```{r}
+data(veteran, package = "randomForestSRC")
+
+# first we convert all x-variables to factors
+veteran2 <- data.frame(lapply(veteran, factor))
+veteran2$time <- veteran$time
+veteran2$status <- veteran$status
+```
+
+
+
+```{r}
+# train the forest 
+o.grow <- rfsrc(Surv(time, status) ~ ., veteran2, ntree = 100, block.size = 1) 
+o.grow
+o.grow$err.rate # Harrell’s C-index (1 minus concordance)
+```
+```{r}
+vimp(o.grow, importance = TRUE)$importance #The default importance="anti" (equivalent to importance=TRUE) assigns cases to the anti (opposite) split.
+vimp(o.grow, importance = "permute")$importance #permutation VIMP (Breiman-Cutler importance) by permuting OOB cases
+```
+```{r}
+plot(o.grow)
+```
+Helper functions get.cindex and get.brier.survival can be used to directly obtain C-index and Brier score metrics for evaluating performance of random survival forests.
+
+
+```{r}
+get.cindex(time = veteran$time, censoring = veteran$status, predicted = o.grow$predicted.oob)
+```
+
+The Brier score measures how accurate predicted probabilities are for events that either happen or do not happen. It does this by comparing each predicted probability to the actual outcome (where 1 means the event occurred and 0 means it did not), squaring the difference, and then averaging these squared differences across all predictions. Lower Brier scores indicate more accurate and reliable predictions, while higher scores mean predictions are often far from true outcomes.
+
+```{r}
+get.brier.survival(o.grow, cens.model = "km")$brier.score
+```
+
+#Plot
+```{r}
+newdata <- data.frame(lapply(1:ncol(veteran),function(i){median(veteran[,i])}))
+colnames(newdata) <- colnames(veteran)
+newdata <- subset(newdata, select=-c(status, time))
+newdata1 <- newdata2 <- newdata
+newdata1[,which(o.grow$xvar.names == "age")] <- quantile(veteran$age, 0.25)
+newdata2[,which(o.grow$xvar.names == "age")] <- quantile(veteran$age, 0.75)
+newdata <- rbind(newdata1,newdata2)
+y.pred <- predict(o.grow,newdata = newdata)
+```
+
+```{r}
+#pdf("survival.pdf", width = 10, height = 8)
+par(cex.axis = 2.0, cex.lab = 2.0, cex.main = 2.0, mar = c(6.0,6,1,1), mgp = c(4, 1, 0))
+plot(round(y.pred$time.interest[1:10],2),y.pred$survival[1,][1:10], type="l", xlab="Time (Year)",   
+     ylab="Survival", col=1, lty=1, lwd=2)
+lines(round(y.pred$time.interest[1:10],2), y.pred$survival[2,][1:10], col=2, lty=2, lwd=2)
+legend("topright", legend=c("Peak age = 51","Peak age = 66"), col=c(1:2), lty=1:2, cex=2, lwd=2)
+#dev.off() 
+```
+
+Plot the Brier Score and Calculate the CRPS
+
+```{r}
+## obtain Brier score using KM and RSF censoring distribution estimators
+bs.km <- get.brier.survival(o.grow, cens.mode = "km")$brier.score[1:10,]
+bs.rsf <- get.brier.survival(o.grow, cens.mode = "rfsrc")$brier.score[1:10,]
+
+## plot the brier score
+plot(bs.km, type = "s", col = 2)
+lines(bs.rsf, type ="s", col = 4)
+legend("bottomright", legend = c("cens.model = km", "cens.model = rfsrc"), fill = c(2,4))
+```
+```{r}
+## here's how to calculate the CRPS for every time point
+trapz <- randomForestSRC:::trapz
+time <- o.grow$time.interest[1:10]
+crps.km <- sapply(1:length(time), function(j) {
+  trapz(time[1:j], bs.km[1:j, 2] / diff(range(time[1:j])))
+})
+crps.rsf <- sapply(1:length(time), function(j) {
+  trapz(time[1:j], bs.rsf[1:j, 2] / diff(range(time[1:j])))
+})
+ 
+## plot CRPS as function of time
+plot(time, crps.km, ylab = "CRPS", type = "s", col = 2)
+lines(time, crps.rsf, type ="s", col = 4)
+legend("bottomright", legend=c("cens.model = km", "cens.model = rfsrc"), fill=c(2,4))
+```
+
+```{r}
+jk.obj <- subsample(o.grow)
+#pdf("VIMPsur.pdf", width = 15, height = 20)
+par(oma = c(0.5, 10, 0.5, 0.5))
+par(cex.axis = 2.0, cex.lab = 2.0, cex.main = 2.0, mar = c(6.0,17,1,1), mgp = c(4, 1, 0))
+plot(jk.obj, xlab = "Variable Importance (x 100)", cex = 1.2)
+```
+
+```{r}
+# Prediction
+veteran3 <- veteran2[1:3, ]
+veteran3$celltype <- factor(c("newlevel", "1", "3"))
+o.pred <- predict(o.grow, veteran3)
+print(o.pred)
+```
+

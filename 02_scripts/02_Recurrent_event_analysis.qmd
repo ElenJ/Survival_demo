@@ -1,0 +1,76 @@
+---
+title: "02_Recurrent_event_analysis"
+format: html
+editor: visual
+---
+
+## Modeling recurrent events in survival analysis
+
+```{r}
+library(survival)
+```
+
+The modeling of recurrent events is illustrated with the
+bladder cancer dataset. Recurrent events are represented
+in the data with multiple observations for subjects having
+multiple events. The data layout for the bladder cancer
+dataset is in the counting process (start, stop) format
+with time intervals defined for each observation.
+
+```{r}
+# load data
+bladder <- readRDS("../01_data/bladder.rds")
+head(bladder, 20)
+```
+
+There are three observations for ID=10, one observation
+for ID=11, three observations for ID=12, and two observations
+for ID=13. The variables START and STOP represent
+the time interval for the risk period specific to that observation. The (start,stop) data format provides a way to indicate
+that a subject experienced multiple events.
+
+
+Next, a recurrent-events Cox model is
+run with the predictors: treatment status (TX), initial number
+of tumors (NUM), and the initial size of tumors (SIZE).
+
+```{r}
+Y=Surv(bladder$start,bladder$stop,bladder$event==1)
+coxph(Y ~ tx + num + size + cluster(id), data=bladder)
+```
+
+The estimated hazard ratio
+(TX=1 vs. TX=0) is 0.663 (with a p-value of 0.0980) and hence not significant.
+
+A stratified Cox model can also be run using the data in this
+format with the variable INTERVAL as the stratified variable.
+The stratified variable indicates whether the subject
+was at risk for their first, second, third, or fourth event. This approach is called a Stratified CP recurrent event
+model and is used if the investigator wants
+to distinguish the order in which recurrent events occur.
+The bladder data is in the proper format to run this model.
+
+```{r}
+coxph(Y ~ tx + num + size + strata(interval) + cluster
+(id),data=bladder)
+```
+Another stratified approach (called Gap Time) is a slight
+variation of the Stratified CP approach. The difference is in
+the way the time intervals for the recurrent events are
+defined. There is no difference in the time intervals when
+subjects are at risk for their first event. However, with the
+Gap Time approach, the starting time at risk gets reset to
+zero for each subsequent event. To run a Gap Time model,
+we need to create two new (start, stop) variables in the
+bladder dataset, which we’ll call START2 and STOP2.
+
+```{r}
+bladder$start2=0
+bladder$stop2=bladder$stop - bladder$start
+
+Y2=Surv(bladder$start2,bladder$stop2,bladder$event)
+coxph(Y2 ~ tx + num + size + strata(interval) + cluster(id),data=bladder)
+```
+The results using the Gap Time approach varies slightly
+from that obtained using the Stratified CP approach.
+
