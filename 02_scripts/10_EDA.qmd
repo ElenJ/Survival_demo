@@ -1,0 +1,475 @@
+---
+title: "Exploratory Data Analysis"
+subtitle: "Basic description of common survival datasets"
+output-dir: "/03_output/03_reports/"
+title-block-banner: true
+author: Myself
+date: last-modified
+date-format: "[Last Updated on] DD MMMM, YYYY"
+affiliation-title: "private"
+lightbox: true
+format:
+  html:
+    cap-location: bottom
+    code-fold: true
+    code-tools: true
+    code-block-bg: true
+    code-line-numbers: true
+    toc: true
+    toc-location: left
+    theme:
+      - sandstone
+    grid:
+      body-width: 1500px
+      sidebar-width: 300px
+      margin-width: 400px
+---
+# Introduction
+
+This script provides a basic exploratory data analysis on example survival datasets, which have been used in Kleinbaum & Klein "Survival Analysis" (https://doi.org/10.1007/978-1-4419-6646-9).
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(GGally) # pairplot
+#install.packages("PerformanceAnalytics")
+library(PerformanceAnalytics) # corrplot
+library(gtsummary) # #Creates presentation-ready tables summarizing data sets, regression models, and more, tidyverse style.
+library(kableExtra) # format tables
+```
+
+## Addicts
+
+In a 1991 Australian study by Caplehorn et al., two methadone treatment clinics for heroin addicts were compared to assess patient time remaining under methadone treatment. A patient’s survival time was determined as the time (in days) until the person dropped out of the clinic or was censored. The two clinics differed according to its live-in policies for patients.
+
+```{r}
+addicts <- readRDS("../01_data/addicts.rds")
+head(addicts)
+summary(addicts)
+```
+
+**Column description:**
+
+-   Column 1: Subject ID
+
+-   Column 2: Clinic (1 or 2)
+
+-   Column 3: Survival status (0 = censored, 1 = departed from clinic)
+
+-   Column 4: Survival time in days
+
+-   Column 5: Prison record (0: none, 1: any)
+
+-   Column 6: Methadone dose (mg/day)
+
+-   Numeric features: Methadone dose (mg/day), Survival time in days
+
+-   Categoric features: Clinic, Prison, Survival status (survival analysis requirement)
+
+```{r, message = FALSE, warning = FALSE}
+# convert categorical values
+addicts[c("clinic", "prison", "status")] <- lapply(addicts[c("clinic", "prison", "status")], as.factor)
+
+ggpairs(addicts[,2:ncol(addicts)], aes(color = clinic))+ theme_bw()
+```
+
+Focus on numeric features only:
+
+```{r}
+plot_df <- addicts[,2:ncol(addicts)] %>% 
+  select(where(is.numeric))
+chart.Correlation(plot_df, histogram=TRUE, pch=19)
+```
+
+==\> There seems to be a slight positive correlation between methadone doase and survival time.
+
+### Overview on Selected Patients ("Table 1")
+
+Create a table1-type overview on selected patients. A good guidance on Table 1 creation is provided by [Hayes-Larson et al.](https://doi.org/10.1016/j.jclinepi.2019.06.011). A good Table 1 should follow the following principles:
+
+-   Rows contain key study variables (all variables included in the final main analysis), though it may be helpful to include other potential confounders and selection variables
+
+-   For studies involving time-to-event analyses, authors should include a summary of person-time, including total and mean or median per person, as well as a summary of reasons for censoring, stratified by exposure status.
+
+-   Descriptive statistics are typically given as n (%) for categorical variables and mean (standard deviation) or (if skewed) median (25th–75th percentile or minimum-maximum) for continuous variables.
+
+-   Total column can be useful to examine the characteristics of the whole sample, but not appropriate in case-control studies, where the controls represent the source population
+
+A technical description on gtsummary is found [here](https://www.danieldsjoberg.com/gtsummary/) and [published](https://journal.r-project.org/archive/2021/RJ-2021-053/RJ-2021-053.pdf)
+
+```{r}
+#| label: table_one
+#| echo: false
+#| warning: false
+# define selected cohort. here: all
+cohort <- addicts[,2:ncol(addicts)]
+
+# create a table1-type
+cohort %>%
+  select(clinic,status, survt, prison, dose) %>%
+    tbl_summary(
+      by = status,
+      statistic = list(all_categorical() ~ "{n} ({p}%)",
+                       dose     ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({IQR})"),
+                       prison ~ "{n} / {N} ({p}%)"),
+      digits = list(all_continuous()  ~ c(2, 2),
+                    all_categorical() ~ c(0, 0)),
+      type = list(dose   ~ "continuous2"),
+      label = list(dose  ~ "Methadone dose (mg/day)")
+  ) %>%
+  # add additional columns
+  # add_overall( #add a column with overall summary statistics, should be omitted in case-control studies 
+  #   last = TRUE,
+  #   # The ** make it bold
+  #   col_label = "**All participants**<br>N = {N}"
+  # ) %>%
+  add_p( #add p-values to the output comparing values across groups
+    test = list(all_categorical() ~ "chisq.test", all_continuous() ~ "t.test"), 
+    pvalue_fun = ~style_pvalue(., digits = 2)) %>% 
+  add_n() %>% #add a column with N (or N missing) for each variable
+  # Change appearance
+  modify_header(
+    label = "**Variable**",
+    # The following adds the % to the column total label
+    # <br> is the location of a line break. 
+    all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)" 
+  ) %>%
+ # modify_caption("Participant characteristics, by treatment") %>% # only useful when no kableExtra added
+ # bold_labels() %>%  
+  as_kable_extra( # note that you don't use kbl() when coming from gtsummary
+    caption = "Table 1. Characteristics of cases and controls, stratified by treatment",
+    booktabs = TRUE,
+    longtable = TRUE,
+    linesep = "",
+    addtl_fmt = FALSE)  %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  add_header_above(c(" " = 1, "Participant characteristics, by status (departed from clinic)" = 3, " " = 1)) 
+```
+
+==\> Lower methadone dose taken by patients experiencing the event (departed from clinic).
+
+## Anderson
+
+The following dataset called consists of remission survival times on 42 leukemia patients, half of whom receive a new therapy and the other half of whom get a standard therapy (Freireich et al., Blood, 1963). The exposure variable of interest is treatment status (Rx = 0 if new treatment, Rx = 1 if standard treatment). Two other variables for control are log white blood cell count (i.e., logWBC) and sex. Failure status is defined by the relapse variable (0 if censored, 1 if failure).
+
+```{r}
+anderson <- readRDS("../01_data/anderson.rds")
+head(anderson)
+```
+
+```{r}
+summary(anderson)
+```
+
+**Column description:**
+
+-   Column 1: Subject ID
+
+-   Column 2: Survival time in days
+
+-   Column 3: Failure status (0 = censored, 1 = relapse)
+
+-   Column 4: Sex (0: none, 1: any)
+
+-   Column 5: Log white blood cell count (logWBC)
+
+-   Column 6: Treatment status (Rx = 0 if new treatment, Rx = 1 if standard treatment)
+
+-   Numeric features: white blood cell count, Survival time in days
+
+-   Categoric features: Sex, Treatment, Failure status
+
+```{r, message = FALSE, warning = FALSE}
+# convert categorical values
+anderson[c("Sex", "Rx", "Relapse")] <- lapply(anderson[c("Sex", "Rx", "Relapse")], as.factor)
+
+ggpairs(anderson[,2:ncol(anderson)], aes(color = Rx))+ theme_bw()
+```
+
+Focus on numeric features only:
+
+```{r}
+plot_df <- anderson[,2:ncol(anderson)] %>% 
+  select(where(is.numeric))
+chart.Correlation(plot_df, histogram=TRUE, pch=12)
+```
+
+==\> There is a negative correlation betweem white blood cell count and survival time.
+
+### Overview on Selected Patients ("Table 1")
+
+```{r}
+#| label: table_one_anderson
+#| echo: false
+#| warning: false
+# define selected cohort. here: all
+cohort <- anderson[,2:ncol(anderson)]
+
+# create a table1-type
+cohort %>%
+  select(Survt,Relapse,Sex,logWBC,Rx) %>%
+    tbl_summary(
+      by = Relapse,
+      statistic = list(all_categorical() ~ "{n} ({p}%)",
+                       logWBC     ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({IQR})"),
+                       Rx ~ "{n} / {N} ({p}%)"),
+      digits = list(all_continuous()  ~ c(2, 2),
+                    all_categorical() ~ c(0, 0)),
+      type = list(logWBC   ~ "continuous2"),
+      label = list(Rx  ~ "Treatment (Rx)")
+  ) %>%
+  # add additional columns
+  # add_overall( #add a column with overall summary statistics, should be omitted in case-control studies 
+  #   last = TRUE,
+  #   # The ** make it bold
+  #   col_label = "**All participants**<br>N = {N}"
+  # ) %>%
+  add_p( #add p-values to the output comparing values across groups
+    test = list(all_categorical() ~ "chisq.test", all_continuous() ~ "t.test"), 
+    pvalue_fun = ~style_pvalue(., digits = 2)) %>% 
+  add_n() %>% #add a column with N (or N missing) for each variable
+  # Change appearance
+  modify_header(
+    label = "**Variable**",
+    # The following adds the % to the column total label
+    # <br> is the location of a line break. 
+    all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)" 
+  ) %>%
+ # modify_caption("Participant characteristics, by treatment") %>% # only useful when no kableExtra added
+ # bold_labels() %>%  
+  as_kable_extra( # note that you don't use kbl() when coming from gtsummary
+    caption = "Table 1. Characteristics of cases and controls, stratified by treatment",
+    booktabs = TRUE,
+    longtable = TRUE,
+    linesep = "",
+    addtl_fmt = FALSE)  %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  add_header_above(c(" " = 1, "Participant characteristics, by status (Relapse)" = 3, " " = 1)) 
+
+```
+
+==\> relapse correlates with logWBC (whute blood cell count) and treatment
+
+## Bladder
+
+This dataset covers for subjects from a study of recurrent bladder cancer tumors (Byar, 1980 and Wei, Lin, and Weissfeld, 1989). The dataset contains 86 patients, each followed for a variable amount of time up to 64 months. The repeated event being analyzed is the recurrence of bladder cancer tumors after transurethral surgical excision. Each recurrence of new tumors was treated by removal at each examination.
+
+```{r}
+bladder <- readRDS("../01_data/bladder.rds")
+head(bladder)
+summary(bladder)
+```
+
+```{r}
+summary(bladder)
+```
+
+**Column description:**
+
+-   Column 1: Subject ID
+
+-   Column 2: Event status (0 = censored, 1 = recurrent bladder cancer)
+
+-   Column 3: Recurrence number (i.e., the sequence number of the recurrence event for the patient)
+
+-   Column 4: Time since previous recurrence (in months)
+
+-   Column 5: start: Start time of the interval (in months)
+
+-   Column 6: stop: Stop time of the interval (in months)
+
+-   Column 7: Treatment status (tx = 0 placebo, tx = 1 treatment with thiotepa)
+
+-   Column 8: Initial number of tumors (num)
+
+-   Column 9: Initial size of tumors (size) in centimeters
+
+
+-   **Numeric features:**
+
+    -   inttime (time since previous recurrence)
+    -   start (start time of interval)
+    -   stop (stop time of interval)
+    -   num (number of tumors)
+    -   size (tumor size)
+
+-   **Categorical features:**
+
+    -   id (used as a grouping factor)
+    -   event (binary outcome)
+    -   interval (ordinal, but often treated as categorical in modeling)
+    -   tx (treatment group)
+
+```{r, message = FALSE, warning = FALSE}
+# convert categorical values
+bladder[c("tx", "event", "interval")] <- lapply(bladder[c("tx", "event", "interval")], as.factor)
+
+ggpairs(bladder[,2:ncol(bladder)], aes(color = tx))+ theme_bw()
+```
+
+### Overview on Selected Patients ("Table 1")
+
+```{r}
+#| label: table_one_bladder
+#| echo: false
+#| warning: false
+# define selected cohort. here: all
+cohort <- bladder[,2:ncol(bladder)]
+
+# create a table1-type
+cohort %>%
+  select(event,interval,inttime,tx,num,size) %>%
+    tbl_summary(
+      by = tx,
+      statistic = list(all_categorical() ~ "{n} ({p}%)",
+                       all_continuous() ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({IQR})"),
+                       #size     ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({IQR})"),
+                       interval ~ "{n} / {N} ({p}%)"),
+      digits = list(all_continuous()  ~ c(2, 2),
+                    all_categorical() ~ c(0, 0)),
+      type = list(size   ~ "continuous2", 
+                  num   ~ "continuous2",
+                  inttime ~ "continuous2"),
+      label = list(interval  ~ "Recurrence number")
+  ) %>%
+  # add additional columns
+  # add_overall( #add a column with overall summary statistics, should be omitted in case-control studies 
+  #   last = TRUE,
+  #   # The ** make it bold
+  #   col_label = "**All participants**<br>N = {N}"
+  # ) %>%
+  add_p( #add p-values to the output comparing values across groups
+    test = list(all_categorical() ~ "chisq.test", all_continuous() ~ "t.test"), 
+    pvalue_fun = ~style_pvalue(., digits = 2)) %>% 
+  add_n() %>% #add a column with N (or N missing) for each variable
+  # Change appearance
+  modify_header(
+    label = "**Variable**",
+    # The following adds the % to the column total label
+    # <br> is the location of a line break. 
+    all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)" 
+  ) %>%
+ # modify_caption("Participant characteristics, by treatment") %>% # only useful when no kableExtra added
+ # bold_labels() %>%  
+  as_kable_extra( # note that you don't use kbl() when coming from gtsummary
+    caption = "Table 1. Characteristics of cases and controls, stratified by treatment",
+    booktabs = TRUE,
+    longtable = TRUE,
+    linesep = "",
+    addtl_fmt = FALSE)  %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  add_header_above(c(" " = 1, "Participant characteristics, by treatment" = 3, " " = 1)) 
+
+```
+
+## Vets
+
+The dataset considers survival times in days for 137 patients from the Veteran’s Administration Lung Cancer Trial cited by Kalbfleisch and Prentice in their text (The Statistical Analysis of Survival Time Data, John Wiley, pp. 223–224, 1980). Failure status is defined by the status variable.
+
+```{r}
+vets <- readRDS("../01_data/vets.rds")
+head(vets)
+summary(vets)
+```
+
+```{r}
+summary(vets)
+```
+
+-   Column 1: Treatment (1: standard, 2: test)
+-   Column 2: Cell type 1 (1: large, 0: other)
+-   Column 3: Cell type 2 (1: adeno, 0: other)
+-   Column 4: Cell type 3 (1: small, 0: other)
+-   Column 5: Cell type 4 (1: squamous, 0: other)
+-   Column 6: Survival time (days)
+-   Column 7: Performance Status (0: worst; 100: best)
+-   Column 8: Disease duration (months)
+-   Column 9: Age
+-   Column 10: Prior therapy (0: none, 10: some)
+-   Column 11: Status (0: censored, 1: died)
+
+-   **Numeric features:**
+
+    -   Survival time 
+    -   Disease duration
+    -   Age
+    -   Performance Status
+    -   Disease duration (months)
+
+
+-   **Categorical features:**
+
+    -   ct1-4
+    -   Prior therapy 
+    -   Status
+    -   Treatment
+    -   Prior therapy
+   
+```{r, message = FALSE, warning = FALSE}
+# convert categorical values
+vets[c("ct1", "ct2", "ct3", "ct4", "status", "tx", "priortx")] <- lapply(vets[c("ct1", "ct2", "ct3", "ct4", "status", "tx", "priortx")], as.factor)
+
+ggpairs(vets, 
+        aes(color = tx),
+        diag = list(continuous = wrap("densityDiag", alpha = 0.5)),
+        title = "Overview on vets dataset") + 
+  theme_bw()
+```
+
+### Overview on Selected Patients ("Table 1")
+
+```{r}
+#| label: table_one_vets
+#| echo: false
+#| warning: false
+# define selected cohort. here: all
+cohort <- vets
+
+# create a table1-type
+cohort %>%
+  select(tx,ct1,ct2,ct3,ct4,survt,perf,dd,age,priortx,status) %>%
+    tbl_summary(
+      by = tx,
+      statistic = list(all_categorical() ~ "{n} ({p}%)",
+                       all_continuous() ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({IQR})")
+                       ),
+      digits = list(all_continuous()  ~ c(2, 2),
+                    all_categorical() ~ c(0, 0)),
+      type = list(survt   ~ "continuous2", 
+                  perf   ~ "continuous2",
+                  dd ~ "continuous2",
+                  age ~ "continuous2"),
+      label = list(perf  ~ "Performance Status",
+                   dd ~ "Disease duration (months)",
+                   priortx ~ "Prior therapy (0: none, 10: some)",
+                   status ~ "Status (0: censored, 1: died)")
+  ) %>%
+  # add additional columns
+  # add_overall( #add a column with overall summary statistics, should be omitted in case-control studies 
+  #   last = TRUE,
+  #   # The ** make it bold
+  #   col_label = "**All participants**<br>N = {N}"
+  # ) %>%
+  add_p( #add p-values to the output comparing values across groups
+    test = list(all_categorical() ~ "chisq.test", all_continuous() ~ "t.test"), 
+    pvalue_fun = ~style_pvalue(., digits = 2)) %>% 
+  add_n() %>% #add a column with N (or N missing) for each variable
+  # Change appearance
+  modify_header(
+    label = "**Variable**",
+    # The following adds the % to the column total label
+    # <br> is the location of a line break. 
+    all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)" 
+  ) %>%
+ # modify_caption("Participant characteristics, by treatment") %>% # only useful when no kableExtra added
+ # bold_labels() %>%  
+  as_kable_extra( # note that you don't use kbl() when coming from gtsummary
+    caption = "Table 1. Characteristics of cases and controls, stratified by treatment",
+    booktabs = TRUE,
+    longtable = TRUE,
+    linesep = "",
+    addtl_fmt = FALSE)  %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  add_header_above(c(" " = 1, "Participant characteristics, by treatment" = 3, " " = 1)) 
+
+```
+
