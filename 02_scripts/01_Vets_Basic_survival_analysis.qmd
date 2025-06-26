@@ -41,6 +41,8 @@ always_allow_html: true
 ```{r, message=FALSE, warning=FALSE}
 library(survival)
 library(survminer) # plotting survival curves
+
+source("helper_functions_survival.R") # load helpful survival functions
 ```
 
 ## 1. Estimating survival functions (unadjusted) and comparing them across strata.
@@ -150,42 +152,66 @@ print(km_plot)
 
 ```{r}
 # Alternative visualization:
-plot(kmfit2, lty = c("solid", "dashed"), col=c("black","grey"),
-xlab="survival time in days",ylab="survival probabilities")
-
-legend("topright", c("Treatment 1 (standard)","Treatment 2 (test)"), lty=c("solid","dashed"),
+plot(kmfit_tx, lty = c("solid", "dashed"), col=c("black","grey"), xlab="survival time in days",ylab="survival probabilities")
+mylegend <- c("Treatment 1 (standard)","Treatment 2 (test)")
+legend("topright", mylegend, lty=c("solid","dashed"),
 col=c("black","grey"))
 ```
 
-Teh survdiff() tests if there is a difference between the two survival curves:
+The survdiff() tests if there is a difference between the two survival curves:
 
 ```{r}
 survdiff(Y ~ tx, data=df)
 ```
 
-There is no statistically significant difference in survival between the two treatment groups (p = 0.9). The observed number of events is nearly identical to what would be expected if there were no treatment effect. Therefore, we fail to reject the null hypothesis that survival is the same across the two groups.
+There is no statistically significant difference in survival between the two treatment groups (p = 0.9). The observed number of events is nearly identical to what would be expected if there were no treatment effect. Therefore, we fail to reject the null hypothesis that survival is the same across the two groups. Also the fact that the two lines cross, suggests the hazard ratio is not constant over time (proportional hazards assumption is violated), so simple Cox or log-rank test interpretations may be inappropriate. We should consider time-specific estimates or alternative methods to characterize group differences.
 
-#BIS HIERHIN
-
-A stratified log rank test for CLINIC (stratified by PRISON) can be run with the þ strata(prison) term included in the model formula. With the stratified approach, the observed minus expected number of events are summed over all failure times for each group within each stratum and then summed over all strata.
+A stratified log rank test for therapy (stratified by former therapy) can be run with the strata(priortx) term included in the model formula. With the stratified approach, the observed minus expected number of events are summed over all failure times for each group within each stratum and then summed over all strata.
 
 ```{r}
-survdiff(Y ~ clinic + strata(prison), data=addicts)
+survdiff(Y ~ tx  + strata(priortx), data=df)
 ```
 
-The result of this test is very similar to that obtained from the log rank test without stratifying on PRISON.
+The result of this test is very similar to that obtained from the log rank test without stratifying on prior therapy.
 
 ## 2. Assessing the PH assumption using graphical approaches.
 
-The proportional hazards assumption for CLINIC can be assessed by plotting log-log Kaplan Meier survival estimates against time (or against the log of time) and evaluating whether the curves are reasonably parallel.
+The proportional hazards assumption for treatment can be assessed by plotting log-log Kaplan Meier survival estimates against time (or against the log of time) and evaluating whether the curves are reasonably parallel. Plotting time on a log scale sometimes straightens out the curves, which can make deviations from parallelism easier to spot.
 
 ```{r}
-plot(kmfit2, fun = "cloglog", lty = c("solid", "dashed"), col=c("black","grey"),
-xlab="time in days using logarithmic scale",ylab="log-log survival",
-main = "log-log curves by clinic")
+## Standard R:
+# plot(kmfit_tx, fun = "cloglog", lty = c("solid", "dashed"), col=c("black","grey"),
+# xlab="time in days using logarithmic scale",ylab="log-log survival",
+# main = "log-log curves by treatment")
+# 
+# legend("topleft", mylegend, lty=c("solid","dashed"),
+# col=c("black","grey"))
 
-legend("topleft", c("Clinic 1","Clinic 2"), lty=c("solid","dashed"),
-col=c("black","grey"))
+ggsurvplot(kmfit_tx, 
+           fun = "cloglog", 
+           data = df,
+           xlab = "Time (days) - logarithmic scale",
+           ylab = "log-log survival",
+           font.x = c(18, "plain", "black"),
+           font.y = c(18, "plain", "black"),
+           font.tickslab = c(18, "plain", "black"),
+           legend.title = "log-log curves by treatment",
+           legend.labs = myLegends,
+           surv.median.line = "hv",
+           submain = submainer,
+           font.legend = c(12, "plain", "black"),
+           conf.int = TRUE,
+           pval = TRUE,
+           pval.size = 5,
+           #pval.method = TRUE,
+           #pval.method.size = 3,
+           risk.table = TRUE,
+           risk.table.pos = "out",
+           risk.table.y.text.col = TRUE,
+           risk.table.y.text = TRUE,
+           risk.table.fontsize = 4,
+           risk.table.height = 0.325
+           ) 
 ```
 
 The plot suggests that the proportional hazards assumption is violated as the log-log survival curves are not parallel.
@@ -193,64 +219,125 @@ The plot suggests that the proportional hazards assumption is violated as the lo
 Alternative visualization: log-log survival vs time (non-log scale):
 
 ```{r}
-kmfit3=summary(kmfit2)
-kmfit4=data.frame(kmfit3$strata,kmfit3$time,kmfit3$surv)
-names(kmfit4)=c("clinic","time","survival")
-clinic1=kmfit4[kmfit4$clinic=="clinic=1", ]
-clinic2=kmfit4[kmfit4$clinic=="clinic=2", ]
+kmfit_tx_summary <- summary(kmfit_tx)
+kmfit_tx_strata <- data.frame(kmfit_tx_summary$strata,kmfit_tx_summary$time,kmfit_tx_summary$surv)
+names(kmfit_tx_strata)=c("treatment","time","survival")
+strata_levels <- sort(unique(kmfit_tx_strata[,1]))
+stratum1 = kmfit_tx_strata[kmfit_tx_strata[,1] == strata_levels[1], ]
+stratum2 = kmfit_tx_strata[kmfit_tx_strata[,1] == strata_levels[2], ]
 
-plot(clinic1$time,log(-log(clinic1$survival)),xlab="survival time in days",ylab="log-log survival",xlim=c(0,800),col="black",type="l",lty="solid",main="log-log curves by clinic")
+plot(stratum1$time,log(-log(stratum1$survival)),xlab="survival time in days",ylab="log-log survival",xlim=c(0,800),col="black",type="l",lty="solid",main="log-log curves by treatment")
 par(new=T)
-plot(clinic2$time,log(-log(clinic2$survival)),axes=F,xlab="survival time in days",ylab="log-log survival",col="grey50",type="l",lty= "dashed")
-legend("bottomright", c("Clinic 1", "Clinic 2"), lty = c("solid", "dashed"),col=c("black","grey50"))
+plot(stratum2$time,log(-log(stratum2$survival)),axes=F,xlab="survival time in days",ylab="log-log survival",col="grey50",type="l",lty= "dashed")
+legend("bottomright", mylegend, lty = c("solid", "dashed"),col=c("black","grey50"))
 par(new=F)
 ```
 
-The plot suggests that the proportional hazards assumption is violated for CLINIC.
+The plot suggests that the proportional hazards assumption is violated for treatment.Thus, calculating a Cox PH model and reporting a single p-value or hazard ratio is potentially misleading.
+
+### 2b Assessing PH assumption visually for multiple covariates
+
+The following function models a survfit model for each covariate and plots a KM curve:
+
+```{r}
+covariates <- setdiff(colnames(df), c("survt", "status"))
+plot_all_vars_loglog(covariates = covariates, df = df, SurvObj = "Surv(survt, status)")
+```
+
+According to the plots and the p-value of the cox.zph test, given at the bottom of the plots, ct2 and perf clearly violate the PH assumption. ct1 is on the verge, where the plot shows divergence, yet the p-value is only slightly significant. Kleinbaum & Klein [1] recommend that one should use a conservative strategy for
+this decision by assuming the PH assumption is satisfied unless there is strong evidence of nonparallelism of the log–log curves.  
+
 
 ## 3. Running a Cox PH model.
 
+This section demonstrates how to run a Cox PH model, given that the factor satisfies the proportional assumption criteria. In a later section, we will take care of the PH violation. 
+
 ```{r}
-summary(coxph(Y ~ prison + dose + clinic, data=addicts))
+cox_full_proportional <- coxph(Y ~ tx + ct1 + ct3 + ct4 + dd + age + priortx, data=df)
+summary(cox_full_proportional)
 ```
 
-The estimated hazard ratio for CLINIC=1 vs CLINIC=2 is 2.7453 (the reciprocal of 0.3643).
+The estimated hazard ratio for the different treatments is 0.84 (the reciprocal of 1.182278).
 
 ```{r}
-1/0.3643
+1/1.182278
 ```
 
-Next, test two interaction (product) terms with PRISON and test the significance of the interaction terms simultaneously with a likelihood ratio test. The following code creates two objects (called mod1 and mod2) that contain information obtained from the coxph function for the no interaction model (mod1 – the reduced model) and the model with the two interaction terms (mod2 – the full model)
+The model shows average predictive discrimination (Concordance = 0.629, SE = 0.028).
+All global tests of significance (Likelihood ratio, Wald, Score/Logrank) indicate that the model is statistically significant overall (all p-values < 0.0001), meaning that at least one variable is a significant predictor of the outcome. Significant Predictors:
+-   ct2 (coef = 1.196, HR = 3.31, 95% CI: 1.83–5.96, p = 7.05e-05): Subjects with Cell type 2 (1: adeno, 0: other) have more than three times the hazard of event occurrence compared to the reference group, all else equal.
+
+-    ct1 (coef = -0.899, HR = 0.41, 95% CI: 0.23–0.73, p = 0.002): Subjects with cell type 1 (1: large, 0: other) have a 59% lower hazard of event occurrence compared to the reference group, after adjusting for other variables. In other words, cell type 1 is associated with significantly improved survival.
+-    ct4 (coef = -1.19, HR = 0.30, 95% CI: 0.17–0.55, p = 7.09e-05): Subjects with cell type 4 (1: squamous, 0: other) have a 70% lower hazard of event occurrence compared to the reference group, holding other variables constant. Thus, cell type 4 is also significantly associated with improved survival.
+
+The finding that both squamous cell carcinoma (ct4) and large cell carcinoma (ct1) are associated with significantly reduced hazard relative to 'other' cell types is medically plausible, given that small cell carcinoma is known to be much more aggressive and associated with poorer survival [2]. Since your reference group includes small cell carcinoma, it is expected that both squamous and large cell carcinomas show lower hazard. Squamous, in particular, is often associated with better survival among lung cancer histologies.
+
+Next, we test two interaction (product) terms with performance and test the significance of the interaction terms simultaneously with a likelihood ratio test. The following code creates two objects (called mod1 and mod2) that contain information obtained from the coxph function for the no interaction model (mod1 – the reduced model) and the model with the two interaction terms (mod2 – the full model)
 
 ```{r}
-mod1=coxph(Y ~ prison + dose + clinic,data=addicts)
-mod2=coxph(Y ~ prison + dose + clinic + clinic*prison
-+ clinic*dose, data=addicts)
+mod1 <- coxph(Y ~ tx + ct1 + ct4, data=df)
+mod1
+mod2 <- coxph(Y ~ tx + ct1 + ct4 + tx*ct1 + tx*ct4, data=df)
 mod2
 ```
+In this survival analysis of 137 patients, cell type was a strong predictor of outcome. Large cell (ct1) and squamous cell carcinoma (ct4) were both associated with significantly improved survival compared to other histological types. There was no overall treatment effect (tx), but in the model with interaction terms, the test treatment was associated with significantly lower hazard specifically in squamous cell patients (tx:ct4 HR = 0.29, p = 0.009). This suggests a potential benefit of the test treatment exclusively in the squamous cell subgroup. Other clinical and demographic variables did not notably impact survival.
 
-Next we wish to perform a likelihood ratio test on the two interaction terms. To calculate the test statistic, we need to subtract the log-likelihood of the full model (with the interaction terms) from the reduced model (without the interaction terms) and multiply that difference by negative 2.
+
+Next we perform a likelihood ratio test on the two interaction terms. This test specifically evaluates whether the inclusion of both interaction terms (tx:ct1 and tx:ct4) jointly provides a significantly better fit to the data compared to a model without them. To calculate the test statistic, we need to subtract the log-likelihood of the full model (with the interaction terms) from the reduced model (without the interaction terms) and multiply that difference by negative 2.
 
 ```{r}
-lrt.surv=function(mod.full,mod.reduced,df) {
-  lrts=(-2)*(mod.full$loglik[2]- mod.reduced$loglik[2])
-  pvalue=1-pchisq(lrts,df)
+lrt.surv <- function(mod.full,mod.reduced,df) {
+  lrts <- (-2)*(mod.full$loglik[2] - mod.reduced$loglik[2])
+  pvalue <- 1 - pchisq(lrts,df)
   return(pvalue)
 }
 
-LRT <- (-2)*(mod1$loglik[2]-mod2$loglik[2])
+LRT <- (-2)*(mod1$loglik[2] - mod2$loglik[2])
 LRT
 ```
 
-We get the output: 3.6, which is the likelihood ratio test statistic. Under the null, this test statistic follows a chisquare distribution with two degrees of freedom. We can use the pchisq function to obtain a p-value for this test.
+We get the output: 7.2, which is the likelihood ratio test statistic. Under the null, this test statistic follows a chisquare distribution with two degrees of freedom. We can use the pchisq function to obtain a p-value for this test.
 
 ```{r}
-lrt.surv(mod1, mod2, 2) #p-value for a two degree of freedom chi-square test.
+#lrt.surv(mod1, mod2, 2) # or use
+#p-value for a two degree of freedom chi-square test.
+p.value <- 1 - pchisq(LRT, 2)
+p.value
+```
+If the p-value is greater than 0.05, we do not reject the null hypothesis and conclude that there is no evidence that the interaction terms significantly improve the model. But as the p-value is smaller, we can assume that the interaction term improves the model.
+
+## 4. Assessing the PH assumption with a statistical test.
+
+The cox.zph function is designed to perform a statistical test on the proportional hazards assumption. This statistical test is a test of correlation between the Schoenfeld residuals and survival time (or ranked survival time). A correlation of zero supports the proportional hazards assumption (the null hypothesis). The cox.zph() function tests whether the proportional hazards (PH) assumption holds for each covariate in a Cox model, as well as for the model as a whole (GLOBAL test). For each covariate and the global model, it produces a test statistic (chisq), degrees of freedom, and a p-value.
+
+```{r}
+cox_full <- coxph(Y ~ tx + ct1 + ct2 + ct3 + ct4 + dd + age + priortx + perf, data=df)
+ph_test <- cox.zph(cox_full, transform = "rank")
+ph_test
+```
+-   p < 0.05 indicates evidence against the PH assumption (the hazard ratio for that covariate seems to vary over time).
+-   p ≥ 0.05 indicates no evidence against PH (the assumption is reasonable for that covariate).
+
+ct1, ct2, ct3, and perf all have p-values < 0.05, indicating violation of the proportional hazards assumption for these covariates. That is, the effect of these variables on hazard appears to change over time.
+tx, dd, age, and priortx do not show violations (p > 0.05). Interestingly, this statistic result contradicts the previously suggested PH-violation of the treatment, requiring a reassessment of the PH-violation by this covariate.
+
+The global test p-value is also significant (p = 2.4e-05), indicating that the model as a whole violates the PH assumption.
+
+
+```{r}
+varnames <- rownames(ph_test$table)
+varnames <- varnames[varnames != "GLOBAL"]
+
+# Loop through each covariate and plot
+for (v in varnames) {
+  plot(ph_test, se = FALSE, var = v, main = paste("Schoenfeld residuals for", v))
+}
 ```
 
-The p-value is not significant at the 0.05 level of significance.
+If the PH assumption is met then the fitted curve should look horizontal because the Schoenfeld residuals would be independent of survival time. However, the fitted curve slopes downward for ct2 and perf, further suggesting violation of PH assumption.
 
-## 4. Running a stratified Cox model.
+# BIS HIER
+## 5. Running a stratified Cox model.
 
 If the proportional hazards assumption is violated for the variable CLINIC but met for PRISON and DOSE, a stratified Cox model can be performed with CLINIC the stratified variable. The coxph function includes a strata() option in the model formula. First we define the response variable Y with the Surv function and then the coxph function is used to run a stratified Cox model.
 
@@ -273,22 +360,7 @@ clinic2:dose + strata(clinic2),data=addicts))
 
 The estimate for exp(b1) can be found in the second table, exp(coef) for prison = 0.9203. The lower and upper confidence limits are 0.4346 and 1.9603, respectively. If we did not recode the variable CLINIC the problem would have been more complicated in that we would have had to use variance–covariance matrix (which can be obtained with the vcov function) to calculate a 95% confidence interval for this hazard ratio.
 
-## 5. Assessing the PH assumption with a statistical test.
 
-The cox.zph function is designed to perform a statistical test on the proportional hazards assumption. This statistical test is a test of correlation between the Schoenfeld residuals and survival time (or ranked survival time). A correlation of zero supports the proportional hazards assumption (the null hypothesis).
-
-```{r}
-mod1=coxph(Y ~ prison + dose + clinic, data=addicts)
-cox.zph(mod1,transform=rank)
-```
-
-The significant p-value offers evidence that the proportional hazards assumption is not satisfied for the variable CLINIC. The p-values for PRISON and DOSE are not significant suggesting that there is not enough evidence to reject the proportional hazards assumption for PRISON and DOSE. The global test (4th row) tests the proportional hazards assumption for the entire model (i.e., for all three predictor variables simultaneously) and is significant with p = 0.005. The global test offers evidence that the proportional hazards assumption is violated for this model.
-
-```{r}
-plot(cox.zph(mod1,transform=rank),se=F,var="clinic")
-```
-
-If the PH assumption is met then the fitted curve should look horizontal because the Schoenfeld residuals would be independent of survival time. However, the fitted curve slopes downward.
 
 ## 6. Obtaining Cox-adjusted survival curves.
 
@@ -515,3 +587,9 @@ summary(coxph(Y ~ prison + dose + frailty(id, distribution="gamma"), data=addict
 ```
 
 The p-value for the frailty is highly significant at 8.6e–3. In this example, the frailty component might be accounting to some extent for the fact that CLINIC was omitted from the model.
+
+## References
+
+[1] Kleinbaum & Klein "Survival Analysis" (https://doi.org/10.1007/978-1-4419-6646-9)
+
+[2] Travis WD, Brambilla E, Nicholson AG, Yatabe Y, Austin JHM, Beasley MB, Chirieac LR, Dacic S, Duhig E, Flieder DB, Geisinger K, Hirsch FR, Ishikawa Y, Kerr KM, Noguchi M, Pelosi G, Powell CA, Tsao MS, Wistuba I; WHO Panel. The 2015 World Health Organization Classification of Lung Tumors: Impact of Genetic, Clinical and Radiologic Advances Since the 2004 Classification. J Thorac Oncol. 2015 Sep;10(9):1243-1260. doi: 10.1097/JTO.0000000000000630. PMID: 26291008.

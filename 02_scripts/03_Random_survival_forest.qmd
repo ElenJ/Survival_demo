@@ -10,7 +10,6 @@ editor: visual
 library(randomForestSRC)
 ```
 
-
 ## Dataset and Problem
 
 H. Ishwaran, M. S. Lauer, E. H. Blackstone, M. Lu, and U. B. Kogalur. 2021. “randomForestSRC: random survival forests vignette.”
@@ -24,23 +23,23 @@ veteran2$time <- veteran$time
 veteran2$status <- veteran$status
 ```
 
-
-
 ```{r}
 # train the forest 
 o.grow <- rfsrc(Surv(time, status) ~ ., veteran2, ntree = 100, block.size = 1) 
 o.grow
 o.grow$err.rate # Harrell’s C-index (1 minus concordance)
 ```
+
 ```{r}
 vimp(o.grow, importance = TRUE)$importance #The default importance="anti" (equivalent to importance=TRUE) assigns cases to the anti (opposite) split.
 vimp(o.grow, importance = "permute")$importance #permutation VIMP (Breiman-Cutler importance) by permuting OOB cases
 ```
+
 ```{r}
 plot(o.grow)
 ```
-Helper functions get.cindex and get.brier.survival can be used to directly obtain C-index and Brier score metrics for evaluating performance of random survival forests.
 
+Helper functions get.cindex and get.brier.survival can be used to directly obtain C-index and Brier score metrics for evaluating performance of random survival forests.
 
 ```{r}
 get.cindex(time = veteran$time, censoring = veteran$status, predicted = o.grow$predicted.oob)
@@ -53,6 +52,7 @@ get.brier.survival(o.grow, cens.model = "km")$brier.score
 ```
 
 #Plot
+
 ```{r}
 newdata <- data.frame(lapply(1:ncol(veteran),function(i){median(veteran[,i])}))
 colnames(newdata) <- colnames(veteran)
@@ -86,6 +86,7 @@ plot(bs.km, type = "s", col = 2)
 lines(bs.rsf, type ="s", col = 4)
 legend("bottomright", legend = c("cens.model = km", "cens.model = rfsrc"), fill = c(2,4))
 ```
+
 ```{r}
 ## here's how to calculate the CRPS for every time point
 trapz <- randomForestSRC:::trapz
@@ -118,4 +119,3 @@ veteran3$celltype <- factor(c("newlevel", "1", "3"))
 o.pred <- predict(o.grow, veteran3)
 print(o.pred)
 ```
-
