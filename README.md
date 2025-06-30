@@ -15,10 +15,8 @@ Survival_demo/
 │
 ├── 02_scripts/
 │   ├── 00_generate_R_dat_input.R         # Code to generate datasets in 01_data/
-│   ├── 01_Basic_survival_analysis.qmd    # Guided basic survival analysis walkthrough (per Kleinbaum & Klein)
 │   ├── 01_Vets_Basic_survival_analysis.qmd # Basic Cox modeling, PH testing, stratified/extended/parametric and frailty models (vets data)
 │   ├── 02_Recurrent_event_analysis.qmd   # Recurrent event survival modeling (per Kleinbaum & Klein)
-│   ├── 03_Random_survival_forest.qmd     # Example: Random survival forest modeling (vets data), following the vignette
 │   ├── 03_Vets_Random_survival_forest.qmd    # Example: Random survival forest modeling (same vets data as in 01_Vets_Basic_survival_analysis.qmd, a "follow-up analysis")
 │   ├── 10_EDA.qmd                        # Exploratory Data Analysis of all example datasets
 │   ├── helper_functions_survival.R       # Custom R functions for survival analysis
