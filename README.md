@@ -1,9 +1,3 @@
----
-editor_options: 
-  markdown: 
-    wrap: 72
----
-
 # Survival_demo
 
 A collection of example scripts for survival analysis, designed as
