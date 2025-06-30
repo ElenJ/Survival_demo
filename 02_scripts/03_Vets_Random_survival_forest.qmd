@@ -1,0 +1,272 @@
+---
+title: "03_Random Survival Forest"
+subtitle: "Vets dataset"
+author:
+  - myself
+date: "`r Sys.Date()`"
+affiliation-title: "private"
+lightbox: true
+format:
+  html:
+    cap-location: bottom
+    code-fold: true
+    code-tools: true
+    code-block-bg: true
+    code-line-numbers: true
+    toc: true
+    toc-location: left
+    theme:
+      - sandstone
+    grid:
+      body-width: 1500px
+      sidebar-width: 300px
+      margin-width: 400px
+output:
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+    keep_tex: true
+description: |
+# runtime: shiny # set this flag if your report has interactive code snippets
+always_allow_html: true
+---
+
+## Random Survival Forest on veteran dataset
+
+```{r}
+#| message: false
+#| warning: false
+
+library(randomForestSRC)
+source("helper_functions_survival.R") # load helpful survival functions
+```
+
+-   The code demonstrates building and interpreting a Random Survival Forest model on clinical survival data.
+
+-   It includes model training, calculating performance metrics (C-index, Brier score), and plotting survival predictions.
+
+-   Variable importance is checked via two methods (anti-split and permutation). Example predictions for hypothetical patients are generated and visualized.
+
+-   The code showcases advanced RSF evaluation such as CRPS and Brier score curves, and jackknife variable importance plots.
+
+All steps and metrics are based on the methods and philosophy of the randomForestSRC package and its official vignette.
+
+The Random Survival Forest (RSF) methodology extends the classic random forests algorithm to analyze right-censored survival data. It enables robust, nonparametric modeling of time-to-event outcomes, capturing nonlinearities and interactions without the proportional hazards assumption.
+
+## Dataset and Problem
+
+Example based on Ishwaran et al. (2021), "randomForestSRC: random survival forests vignette". he dataset considers survival times in days for 137 patients from the Veteran’s Administration Lung Cancer Trial cited by Kalbfleisch and Prentice in their text (The Statistical Analysis of Survival Time Data, John Wiley, pp. 223–224, 1980). Failure status is defined by the status variable. A basic EDA is provided in 10_EDA.qmd. A basic cox regression analysis in 01_VEts_Basic_survival_analysis.qmd.
+
+The survival dataset is loaded and preprocessed. All relevant categorical predictors (such as treatment, cell types, and prior therapy) are explicitly converted to factors so that the RSF algorithm splits these variables on their levels. The survival outcome (time) and event indicator (status) are restored as numeric, ensuring compatibility with survival modeling functions.
+
+```{r}
+# Load the dataset (assumed pre-processed, similar to veteran in vignettes)
+df <- readRDS("../01_data/vets.rds")
+
+# run a cox model with all covariates
+Y <- Surv(df$survt, df$status==1) # creates a survival object 
+covariates <- setdiff(colnames(df), c("survt", "status"))
+cox_formula <- as.formula(paste0("Y", "~", paste(covariates, collapse="+")))
+cox_full <- coxph(cox_formula, data=df)
+
+# function to select covariates being PH and those that are violating PH-assumption programmatically with the cox.zph()
+cox_full_covariates <- PH_cofactors(cox_full)
+
+# drop covariates violating the PH-assumption
+# Convert all predictor variables to factors for categorical handling by RSF
+veteran2 <- df %>%
+  select(-all_of(cox_full_covariates$cofactors$violating)) %>%
+  mutate(across(c(tx, ct1, ct3, ct4, priortx), as.factor))
+
+# Restore survival time and status as numeric for analysis
+veteran2$survt   <- df$survt
+veteran2$status <- df$status
+```
+
+## Model Fitting: Training the Random Survival Forest
+
+The RSF is trained using all predictors to model survival time and event status. The rfsrc function fits an ensemble of 100 survival trees, each grown on a bootstrap sample of the data and considering random subsets of variables at each node. The ensemble nature of RSF allows it to robustly estimate survival probabilities, handle non-linear and interaction effects, and manage high-dimensional inputs. The output and error rate (often one minus Harrell’s C-index) are examined to assess overall model performance via out-of-bag (OOB) samples, providing an unbiased error estimate.
+
+```{r}
+# Fit a Random Survival Forest
+# - Surv(time, status): Survival time and event indicator
+# - All other variables as predictors
+# - ntree = 100: number of trees in the forest (increase for more stable results)
+# - block.size = 1: for memory management (default is usually fine for small datasets)
+o.grow <- rfsrc(Surv(survt, status) ~ ., veteran2, ntree = 100, block.size = 1)
+
+# Print RSF summary, including error rates and forest details
+print(o.grow)
+
+# View OOB error rate (Harrell's C-index reported as 1 - concordance)
+o.grow$err.rate
+```
+
+## Variable Importance Estimation
+
+Variable importance (VIMP) measures are computed to quantify each predictor’s contribution to survival prediction accuracy. The "anti" importance (default) shows VIMP by re-using splits in a reversed manner, while the permutation importance (Breiman-Cutler method) estimates the increase in OOB prediction error when variable values are randomly permuted. This helps to identify which variables the model deems most relevant for outcome prediction.
+
+```{r}
+# Variable Importance (VIMP)
+# By default, importance="anti" (splits on the variable are reversed to degrade accuracy)
+vimp_anti <- vimp(o.grow, importance = TRUE)$importance
+vimp_anti
+# Permutation VIMP (Breiman-Cutler): Variable values are permuted for OOB samples
+vimp_perm <- vimp(o.grow, importance = "permute")$importance
+vimp_perm
+```
+For both measures, ct4 and ct1 are most important, followed by ct3. Negative or near-zero values (e.g., priortx, age in vimp_perm) suggest those variables act as noise or are not predictive.
+
+The RSF calculates feature importance and suggests ct3 being less important than ct4 and ct1, but ct3 is consistently identified by both modeling approaches (Cox and RSF) as an important predictor of survival. In RSF, while ct4 and ct1 had slightly higher importance, ct3 was still among the top predictors.
+
+The difference lies in the methods: RSF can capture potentially complex or non-linear relationships and interactions, and may distribute predictive power over several correlated or similarly predictive variables. Cox regression, through its stepwise selection, drops other variables if their effect is not statistically significant when ct3 is in the model.
+
+The fact that ct3 is the last feature standing in Cox, and is within the top three RSF importance scores, indicates strong and robust predictive value across different survival modeling approaches.
+
+
+Plotting the RSF helps to visually assess convergence, prediction stability, and the effect of number of trees on overall error, thus validating appropriate model construction.
+
+```{r}
+# Plot overall RSF performance (OOB error, trees)
+plot(o.grow)
+```
+
+## Model Evaluation: C-index & Brier Score
+
+Helper functions get.cindex and get.brier.survival can be used to directly obtain C-index and Brier score metrics for evaluating performance of random survival forests.
+
+The Concordance Index (C-index) is a measure of discrimination, indicating the likelihood that the model correctly ranks patients by their predicted risk. C-index measures how well the model predicts the ordering of event times—higher is better (max=1).
+
+The Brier Score is a time-dependent measure of prediction accuracy reflecting mean squared error between predicted and actual event status; lower values indicate better calibration and reliability. Brier score measures mean squared error between predicted and actual survival; lower scores are better.
+
+```{r}
+# Compute the concordance index (C-index) for OOB predictions
+get.cindex(time = df$survt, censoring = df$status, predicted = o.grow$predicted.oob)
+```
+
+The Brier score measures how accurate predicted probabilities are for events that either happen or do not happen. It does this by comparing each predicted probability to the actual outcome (where 1 means the event occurred and 0 means it did not), squaring the difference, and then averaging these squared differences across all predictions. Lower Brier scores indicate more accurate and reliable predictions, while higher scores mean predictions are often far from true outcomes.
+
+```{r}
+# Compute the Brier score (integrated measure of probabilistic accuracy for survival)
+# Lower = better. Uses KM estimator for the censoring distribution by default.
+get.brier.survival(o.grow, cens.model = "km")$brier.score
+```
+
+
+#Survival Prediction for Hypothetical Patients
+
+Synthetic patients are created with all predictors set to typical values, except for one variable of interest (e.g. a specific cell type), set at contrasting values. Predicting survival curves for these profiles illustrates how the RSF model’s risk prediction responds to meaningful clinical scenarios.
+
+```{r}
+# Use the template from your model
+template <- o.grow$xvar
+
+# Helper for median/mode row following training structure
+default_row <- as.data.frame(lapply(names(template), function(nm) {
+  x <- template[[nm]]
+  if (is.numeric(x)) {
+    median(x, na.rm = TRUE)
+  } else if (is.factor(x)) {
+    lvls <- levels(x)
+    modeval <- lvls[which.max(tabulate(x))]
+    factor(modeval, levels = lvls)
+  } else {
+    x[1]
+  }
+}))
+names(default_row) <- names(template)
+
+# Create two hypothetical patients differing only by ct3
+newdata1 <- default_row
+newdata2 <- default_row
+
+# Set ct3 for the two scenarios:
+# Assume levels are "0" and "1" (adjust if your levels are different!)
+newdata1$ct3 <- factor("0", levels = levels(template$ct3))
+newdata2$ct3 <- factor("1", levels = levels(template$ct3))
+
+newdata <- rbind(newdata1, newdata2)
+
+# Predict survival
+y.pred <- predict(o.grow, newdata = newdata)
+
+# Plot
+par(cex.axis = 2.0, cex.lab = 2.0, cex.main = 2.0, mar = c(6.0,6,1,1), mgp = c(4, 1, 0))
+plot(y.pred$time.interest[1:10], y.pred$survival[1,1:10], type = "l",
+     xlab = "Time (Year)", ylab = "Survival", col = 1, lty = 1, lwd = 2)
+lines(y.pred$time.interest[1:10], y.pred$survival[2,1:10], col = 2, lty = 2, lwd = 2)
+legend("topright", legend = c("ct3 = 0", "ct3 = 1"), col = c(1,2), lty = 1:2, cex = 2, lwd = 2)
+```
+
+Estimated survival functions for two hypothetical patients are plotted, providing a direct visual comparison of how survival probabilities evolve over time under different covariate settings. This demonstrates the flexibility and individualized risk prediction made possible by RSF.
+
+## Brier Score and CRPS Visualization
+
+The Brier Score is evaluated using both KM-estimated and RSF-estimated censoring distributions for benchmarking, with results plotted to compare predictive accuracy over time. The CRPS (Continuous Ranked Probability Score), which integrates the Brier Score over time, is also calculated and visualized. These metrics provide further insight into the overall and time-specific calibration of the RSF model.
+
+```{r}
+# Calculate Brier score for first 10 time points using both KM and RSF censoring estimators
+bs.km  <- get.brier.survival(o.grow, cens.model = "km")$brier.score[1:10, ]
+bs.rsf <- get.brier.survival(o.grow, cens.model = "rfsrc")$brier.score[1:10, ]
+
+# Plot Brier scores as a step plot
+plot(bs.km, type = "s", col = 2)
+lines(bs.rsf, type = "s", col = 4)
+legend("bottomright", legend = c("cens.model = km", "cens.model = rfsrc"), fill = c(2,4))
+```
+
+```{r}
+# Calculate CRPS (Continuous Ranked Probability Score) at each time
+# trapz computes the integral (area under Brier curve over time)
+trapz <- randomForestSRC:::trapz
+time <- o.grow$time.interest[1:10]
+
+crps.km <- sapply(1:length(time), function(j) {
+  trapz(time[1:j], bs.km[1:j, 2] / diff(range(time[1:j])))
+})
+crps.rsf <- sapply(1:length(time), function(j) {
+  trapz(time[1:j], bs.rsf[1:j, 2] / diff(range(time[1:j])))
+})
+
+# Plot CRPS curves for both censoring models
+plot(time, crps.km, ylab = "CRPS", type = "s", col = 2)
+lines(time, crps.rsf, type = "s", col = 4)
+legend("bottomright", legend = c("cens.model = km", "cens.model = rfsrc"), fill = c(2,4))
+```
+
+## Variable Importance via Subsampling/Jackknife
+
+A more advanced variable importance assessment is performed using jackknife subsampling, producing robust estimates even in complex or high-dimensional scenarios. The resulting importance plot better captures uncertainty in variable selection and highlights predictors most stably associated with survival outcomes.
+
+```{r}
+jk.obj <- subsample(o.grow)
+par(oma = c(0.5, 2, 0.5, 0.5))
+par(mar = c(5, 20, 4, 2), cex.axis = 2, cex.lab = 2)
+plot(jk.obj, xlab = "Variable Importance (x 100)", cex = 1.2)
+```
+
+
+
+## Prediction for New Patients with Unseen Levels
+
+Predictions are generated for hypothetical patients, including some with previously unseen factor levels (e.g., a new celltype). This stress-tests the model’s robustness and indicates how it handles real-world situations where new patient characteristics may emerge.
+
+```{r}
+# Select first 3 patients (example) and assign hypothetical new levels to celltype
+veteran3 <- veteran2[1:3, ]
+veteran3$celltype <- factor(c("newlevel", "1", "0"))
+
+# Make prediction for these new/fake patients
+o.pred <- predict(o.grow, veteran3)
+o.pred
+
+#the predicted survival curve for the first new patient is:
+s1 <- o.pred$survival[1, ]
+t <- o.pred$time.interest
+plot(t, s1, type = "l", xlab = "Time", ylab = "Predicted survival probability")
+```

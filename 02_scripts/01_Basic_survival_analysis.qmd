@@ -10,6 +10,7 @@ editor: visual
 library(survival)
 ```
 
+This script is largely based on [1].
 
 ## 1. Estimating survival functions (unadjusted) and comparing them across strata.
 
@@ -192,8 +193,7 @@ CLINIC x 2=0.
 
 ```{r}
 addicts$clinic2 <- addicts$clinic-2
-summary(coxph(Y ~ prison + dose + clinic2:prison +
-clinic2:dose + strata(clinic2),data=addicts))
+summary(coxph(Y ~ prison + dose + clinic2:prison + clinic2:dose + strata(clinic2),data=addicts))
 ```
 The estimate for exp(b1) can be found in the second table,
 exp(coef) for prison = 0.9203. The lower and upper confidence
@@ -378,9 +378,9 @@ compared to the model with two heaviside functions but
 the estimated hazard ratios are the same. The estimated
 hazard ratio (CLINIC=2 vs. CLINIC=1) is 0.632 for days
 <365 (exponentiate the coefficient for CLINIC). In order to
-estimate the hazard ratio for days  365, we need to sum
+estimate the hazard ratio for days >= 365, we need to sum
 the coefficient estimates for CLINIC and HV2 and then
-exponentiate (exp(-0.4594 þ -1.3711)) = 0.160). The significant
+exponentiate (exp(-0.4594 + -1.3711)) = 0.160). The significant
 p-value for the estimated coefficient for HV2 of (p =
 3.6e-10 or p = 0.0036) suggests that the hazard ratios for
 CLINIC for the two different time periods are not equal. In
@@ -545,5 +545,10 @@ summary(coxph(Y ~ prison + dose + frailty(id, distribution="gamma"), data=addict
 The p-value for the frailty is highly significant at 8.6e–3. In this example, the frailty component might be
 accounting to some extent for the fact that CLINIC was
 omitted from the model.
+
+## References
+
+\[1\] Kleinbaum & Klein "Survival Analysis" (https://doi.org/10.1007/978-1-4419-6646-9)
+
 
 

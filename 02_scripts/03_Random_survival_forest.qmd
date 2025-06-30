@@ -119,3 +119,6 @@ veteran3$celltype <- factor(c("newlevel", "1", "3"))
 o.pred <- predict(o.grow, veteran3)
 print(o.pred)
 ```
+
+## References
+H. Ishwaran, M. S. Lauer, E. H. Blackstone, M. Lu, and U. B. Kogalur. 2021. "randomForestSRC: random survival forests vignette." http://randomforestsrc.org/articles/survival.html.

@@ -38,14 +38,38 @@ always_allow_html: true
 
 # Basic survival analysis
 
+This script provides a comprehensive workflow for survival analysis using Cox regression and related methods. It is intended as both a tutorial and a practical guide for modeling time-to-event outcomes, with particular emphasis on variable selection, model evaluation, and extensions to basic Cox models. The analysis comprises the following key components:
+
+**Basic Cox Proportional Hazards Modeling:** The script introduces fitting the Cox proportional hazards model to explore the association between predictors (covariates) and survival time. This semi-parametric model allows for flexible modeling of the effect of variables on the hazard of the event of interest over time.
+
+**Assessment of the Proportional Hazards Assumption:** We systematically check the proportional hazards (PH) assumption for each covariate using graphical diagnostics and statistical tests. This ensures the validity of model interpretations and highlights variables that may require special handling due to time-dependent effects.
+
+**Feature Selection Procedures:** A variable selection strategy is applied to identify the most informative and statistically significant predictors for the survival model. Approaches such as backward elimination or stepwise selection are employed to develop a parsimonious and robust final model.
+
+**Stratified Cox Models:** The script demonstrates the use of stratification to address situations where the PH assumption is violated for particular categorical variables. Stratified Cox models allow different baseline hazards across strata, improving model fit and validity of inferences.
+
+**Extended Cox Models:** To account for covariates with time-varying effects, extended Cox models are implemented. These models introduce time-dependent variables or interactions, providing accurate estimation in the presence of non-proportional hazards.
+
+**Non-Parametric Survival Estimates:** Methods such as Kaplan-Meier estimation and log-rank tests are included to summarize and compare survival experiences across groups without making parametric or semi-parametric assumptions.
+
+**Frailty Models:** The analysis explores frailty (random-effects) Cox models to account for unobserved heterogeneity or clustering in the data (e.g., patients within clinical centers), offering insight into correlated survival outcomes.
+
+Throughout, the code includes comments and explanations to facilitate understanding and replication. Users are encouraged to consult standard survival analysis references and the literature for further theoretical background and interpretation (see \[1\]).
+
+This script is designed for both beginners and intermediate users of survival analysis in R, and serves as a foundation for more advanced modeling and data exploration.
+
 ```{r, message=FALSE, warning=FALSE}
 library(survival)
 library(survminer) # plotting survival curves
+library(tidyverse)
+library(broom) # tidy summary output
+library(kableExtra) # pretty tables
+library(stringr)
 
 source("helper_functions_survival.R") # load helpful survival functions
 ```
 
-## 1. Estimating survival functions (unadjusted) and comparing them across strata.
+## Dataset
 
 The dataset considers survival times in days for 137 patients from the Veteran’s Administration Lung Cancer Trial cited by Kalbfleisch and Prentice in their text (The Statistical Analysis of Survival Time Data, John Wiley, pp. 223–224, 1980). Failure status is defined by the status variable.
 
@@ -56,38 +80,50 @@ head(df)
 ```
 
 -   Column 1: Treatment (1: standard, 2: test)
+
 -   Column 2: Cell type 1 (1: large, 0: other)
+
 -   Column 3: Cell type 2 (1: adeno, 0: other)
+
 -   Column 4: Cell type 3 (1: small, 0: other)
+
 -   Column 5: Cell type 4 (1: squamous, 0: other)
+
 -   Column 6: Survival time (days)
+
 -   Column 7: Performance Status (0: worst; 100: best)
+
 -   Column 8: Disease duration (months)
+
 -   Column 9: Age
+
 -   Column 10: Prior therapy (0: none, 10: some)
+
 -   Column 11: Status (0: censored, 1: died)
 
 -   **Numeric features:**
 
-    -   Survival time 
+    -   Survival time
     -   Disease duration
     -   Age
     -   Performance Status
     -   Disease duration (months)
 
-
 -   **Categorical features:**
 
     -   ct1-4
-    -   Prior therapy 
+    -   Prior therapy
     -   Status
     -   Treatment
     -   Prior therapy
+
+## 1. Estimating survival functions (unadjusted) and comparing them across strata.
 
 ```{r, message=FALSE}
 #The function Surv creates a survival object in R :
 Surv(df$survt,df$status==1)
 ```
+
 Generate an Intercept-only model as baseline:
 
 ```{r}
@@ -96,7 +132,9 @@ Y <- Surv(df$survt, df$status==1) # creates a survival object
 kmfit1 <- survfit(Y ~ 1)
 summary(kmfit1, times = seq(from = 0, by = 50, length.out = 10))
 ```
-Generate a model considering treatment as the only factor:
+
+Generate a model considering treatment as the only factor (here, only as an example):
+
 ```{r}
 #| echo: false
 #| fig-width: 15
@@ -244,13 +282,11 @@ covariates <- setdiff(colnames(df), c("survt", "status"))
 plot_all_vars_loglog(covariates = covariates, df = df, SurvObj = "Surv(survt, status)")
 ```
 
-According to the plots and the p-value of the cox.zph test, given at the bottom of the plots, ct2 and perf clearly violate the PH assumption. ct1 is on the verge, where the plot shows divergence, yet the p-value is only slightly significant. Kleinbaum & Klein [1] recommend that one should use a conservative strategy for
-this decision by assuming the PH assumption is satisfied unless there is strong evidence of nonparallelism of the log–log curves.  
+According to the plots and the p-value of the cox.zph test, given at the bottom of the plots, ct2 and perf clearly violate the PH assumption. ct1 is on the verge, where the plot shows divergence, yet the p-value is only slightly significant. Kleinbaum & Klein \[1\] recommend that one should use a conservative strategy for this decision by assuming the PH assumption is satisfied unless there is strong evidence of nonparallelism of the log–log curves.
 
+## 3. Running a Cox PH model (example).
 
-## 3. Running a Cox PH model.
-
-This section demonstrates how to run a Cox PH model, given that the factor satisfies the proportional assumption criteria. In a later section, we will take care of the PH violation. 
+This section demonstrates how to run a Cox PH model, given that the factor satisfies the proportional assumption criteria. In a later section, we will take care of the PH violation.
 
 ```{r}
 cox_full_proportional <- coxph(Y ~ tx + ct1 + ct3 + ct4 + dd + age + priortx, data=df)
@@ -263,14 +299,12 @@ The estimated hazard ratio for the different treatments is 0.84 (the reciprocal 
 1/1.182278
 ```
 
-The model shows average predictive discrimination (Concordance = 0.629, SE = 0.028).
-All global tests of significance (Likelihood ratio, Wald, Score/Logrank) indicate that the model is statistically significant overall (all p-values < 0.0001), meaning that at least one variable is a significant predictor of the outcome. Significant Predictors:
--   ct2 (coef = 1.196, HR = 3.31, 95% CI: 1.83–5.96, p = 7.05e-05): Subjects with Cell type 2 (1: adeno, 0: other) have more than three times the hazard of event occurrence compared to the reference group, all else equal.
+The model shows average predictive discrimination (Concordance = 0.629, SE = 0.028). All global tests of significance (Likelihood ratio, Wald, Score/Logrank) indicate that the model is statistically significant overall (all p-values \< 0.0001), meaning that at least one variable is a significant predictor of the outcome. Significant Predictors: - ct2 (coef = 1.196, HR = 3.31, 95% CI: 1.83–5.96, p = 7.05e-05): Subjects with Cell type 2 (1: adeno, 0: other) have more than three times the hazard of event occurrence compared to the reference group, all else equal.
 
--    ct1 (coef = -0.899, HR = 0.41, 95% CI: 0.23–0.73, p = 0.002): Subjects with cell type 1 (1: large, 0: other) have a 59% lower hazard of event occurrence compared to the reference group, after adjusting for other variables. In other words, cell type 1 is associated with significantly improved survival.
--    ct4 (coef = -1.19, HR = 0.30, 95% CI: 0.17–0.55, p = 7.09e-05): Subjects with cell type 4 (1: squamous, 0: other) have a 70% lower hazard of event occurrence compared to the reference group, holding other variables constant. Thus, cell type 4 is also significantly associated with improved survival.
+-   ct1 (coef = -0.899, HR = 0.41, 95% CI: 0.23–0.73, p = 0.002): Subjects with cell type 1 (1: large, 0: other) have a 59% lower hazard of event occurrence compared to the reference group, after adjusting for other variables. In other words, cell type 1 is associated with significantly improved survival.
+-   ct4 (coef = -1.19, HR = 0.30, 95% CI: 0.17–0.55, p = 7.09e-05): Subjects with cell type 4 (1: squamous, 0: other) have a 70% lower hazard of event occurrence compared to the reference group, holding other variables constant. Thus, cell type 4 is also significantly associated with improved survival.
 
-The finding that both squamous cell carcinoma (ct4) and large cell carcinoma (ct1) are associated with significantly reduced hazard relative to 'other' cell types is medically plausible, given that small cell carcinoma is known to be much more aggressive and associated with poorer survival [2]. Since your reference group includes small cell carcinoma, it is expected that both squamous and large cell carcinomas show lower hazard. Squamous, in particular, is often associated with better survival among lung cancer histologies.
+The finding that both squamous cell carcinoma (ct4) and large cell carcinoma (ct1) are associated with significantly reduced hazard relative to 'other' cell types is medically plausible, given that small cell carcinoma is known to be much more aggressive and associated with poorer survival \[2\]. Since your reference group includes small cell carcinoma, it is expected that both squamous and large cell carcinomas show lower hazard. Squamous, in particular, is often associated with better survival among lung cancer histologies.
 
 Next, we test two interaction (product) terms with performance and test the significance of the interaction terms simultaneously with a likelihood ratio test. The following code creates two objects (called mod1 and mod2) that contain information obtained from the coxph function for the no interaction model (mod1 – the reduced model) and the model with the two interaction terms (mod2 – the full model)
 
@@ -280,8 +314,8 @@ mod1
 mod2 <- coxph(Y ~ tx + ct1 + ct4 + tx*ct1 + tx*ct4, data=df)
 mod2
 ```
-In this survival analysis of 137 patients, cell type was a strong predictor of outcome. Large cell (ct1) and squamous cell carcinoma (ct4) were both associated with significantly improved survival compared to other histological types. There was no overall treatment effect (tx), but in the model with interaction terms, the test treatment was associated with significantly lower hazard specifically in squamous cell patients (tx:ct4 HR = 0.29, p = 0.009). This suggests a potential benefit of the test treatment exclusively in the squamous cell subgroup. Other clinical and demographic variables did not notably impact survival.
 
+In this survival analysis of 137 patients, cell type was a strong predictor of outcome. Large cell (ct1) and squamous cell carcinoma (ct4) were both associated with significantly improved survival compared to other histological types. There was no overall treatment effect (tx), but in the model with interaction terms, the test treatment was associated with significantly lower hazard specifically in squamous cell patients (tx:ct4 HR = 0.29, p = 0.009). This suggests a potential benefit of the test treatment exclusively in the squamous cell subgroup. Other clinical and demographic variables did not notably impact survival.
 
 Next we perform a likelihood ratio test on the two interaction terms. This test specifically evaluates whether the inclusion of both interaction terms (tx:ct1 and tx:ct4) jointly provides a significantly better fit to the data compared to a model without them. To calculate the test statistic, we need to subtract the log-likelihood of the full model (with the interaction terms) from the reduced model (without the interaction terms) and multiply that difference by negative 2.
 
@@ -304,6 +338,7 @@ We get the output: 7.2, which is the likelihood ratio test statistic. Under the 
 p.value <- 1 - pchisq(LRT, 2)
 p.value
 ```
+
 If the p-value is greater than 0.05, we do not reject the null hypothesis and conclude that there is no evidence that the interaction terms significantly improve the model. But as the p-value is smaller, we can assume that the interaction term improves the model.
 
 ## 4. Assessing the PH assumption with a statistical test.
@@ -311,18 +346,19 @@ If the p-value is greater than 0.05, we do not reject the null hypothesis and co
 The cox.zph function is designed to perform a statistical test on the proportional hazards assumption. This statistical test is a test of correlation between the Schoenfeld residuals and survival time (or ranked survival time). A correlation of zero supports the proportional hazards assumption (the null hypothesis). The cox.zph() function tests whether the proportional hazards (PH) assumption holds for each covariate in a Cox model, as well as for the model as a whole (GLOBAL test). For each covariate and the global model, it produces a test statistic (chisq), degrees of freedom, and a p-value.
 
 ```{r}
-cox_full <- coxph(Y ~ tx + ct1 + ct2 + ct3 + ct4 + dd + age + priortx + perf, data=df)
+covariates <- setdiff(colnames(df), c("survt", "status"))
+cox_formula <- as.formula(paste0("Y", "~", paste(covariates, collapse="+")))
+cox_full <- coxph(cox_formula, data=df)
 ph_test <- cox.zph(cox_full, transform = "rank")
 ph_test
 ```
--   p < 0.05 indicates evidence against the PH assumption (the hazard ratio for that covariate seems to vary over time).
+
+-   p \< 0.05 indicates evidence against the PH assumption (the hazard ratio for that covariate seems to vary over time).
 -   p ≥ 0.05 indicates no evidence against PH (the assumption is reasonable for that covariate).
 
-ct1, ct2, ct3, and perf all have p-values < 0.05, indicating violation of the proportional hazards assumption for these covariates. That is, the effect of these variables on hazard appears to change over time.
-tx, dd, age, and priortx do not show violations (p > 0.05). Interestingly, this statistic result contradicts the previously suggested PH-violation of the treatment, requiring a reassessment of the PH-violation by this covariate.
+ct1, ct2, ct3, and perf all have p-values \< 0.05, indicating violation of the proportional hazards assumption for these covariates. That is, the effect of these variables on hazard appears to change over time. tx, dd, age, and priortx do not show violations (p \> 0.05). Interestingly, this statistic result contradicts the previously suggested PH-violation of the treatment, requiring a reassessment of the PH-violation by this covariate.
 
 The global test p-value is also significant (p = 2.4e-05), indicating that the model as a whole violates the PH assumption.
-
 
 ```{r}
 varnames <- rownames(ph_test$table)
@@ -336,260 +372,408 @@ for (v in varnames) {
 
 If the PH assumption is met then the fitted curve should look horizontal because the Schoenfeld residuals would be independent of survival time. However, the fitted curve slopes downward for ct2 and perf, further suggesting violation of PH assumption.
 
-# BIS HIER
-## 5. Running a stratified Cox model.
-
-If the proportional hazards assumption is violated for the variable CLINIC but met for PRISON and DOSE, a stratified Cox model can be performed with CLINIC the stratified variable. The coxph function includes a strata() option in the model formula. First we define the response variable Y with the Surv function and then the coxph function is used to run a stratified Cox model.
-
 ```{r}
-coxph(Y ~ prison + dose + strata(clinic), data=addicts)
-
-coxph(Y ~ prison + dose + clinic:prison + clinic:dose +
-strata(clinic), data=addicts)
+# function to select covariates being PH and those that are violating PH-assumption programmatically with the cox.zph()
+cox_full_covariates <- PH_cofactors(cox_full)
+cox_full_covariates$cofactors$violating
+cox_full_covariates$cofactors$non_violating
 ```
 
-Suppose we wish to estimate the hazard ratio for PRISON=1 vs. PRISON=0 for CLINIC=2. This hazard ratio can be estimated by exponentiating the coefficient for prison plus 2 times the coefficient for the CLINIC\* PRISON interaction term. This expression is obtained by substituting the appropriate values into the hazard in both the numerator (for PRISON=1) and denominator (for PRISON=0)
+## 5. Running backward feature selection
 
-In this example, we are interested in a hazard ratio PRISON=1 versus PRISON=0 for CLINIC=2. We can define a new variable CLINIC x 2 so when CLINIC=2, CLINIC x 2=0.
+In the following analysis, we model survival using a Cox proportional hazards model, incorporating a systematic feature selection procedure. The main steps are as follows:
+
+1)  Variable Selection and Data Preparation: Candidate predictors are chosen for potential inclusion in the model. Data are reviewed for missing values, which are appropriately handled or imputed to ensure completeness.
+
+2)  Model Specification: A survival object is created for the outcome of interest (e.g. survival), and a Cox regression formula is constructed dynamically based on the selected variables.
+
+3)  Model Fitting: The Cox model is fit to the dataset, and initial results are examined.
+
+4)  Backward Feature Selection: Backward elimination is performed by iteratively removing the variable with the highest non-significant p-value, refining the model to retain only those predictors that remain statistically significant according to a predefined threshold.
+
+5)  Final Model Specification: The final, reduced Cox model formula is produced, containing only the most relevant predictors.
+
+This approach ensures that the survival model remains both interpretable and statistically robust, ultimately highlighting the variables most strongly associated with differences in survival.
+
+
+First, we get an overview on the individual covariates, modelled in their individual models:
 
 ```{r}
-addicts$clinic2 <- addicts$clinic-2
-summary(coxph(Y ~ prison + dose + clinic2:prison +
-clinic2:dose + strata(clinic2),data=addicts))
+mycovariates <- cox_full_covariates$cofactors$non_violating
+# calculate cox models for each feature individually
+result_cox <- calculate_cox_per_feature(df, mycovariates)
+# Show the results
+result_cox %>% 
+  mutate_if(is.numeric, round, 3) %>%   # Round all numeric columns to 3 decimals
+  arrange(variable) %>%
+  select(variable, everything()) %>%
+  kable(., row.names = FALSE) %>% 
+  kable_classic(full_width = T, html_font = "Arial") 
 ```
 
-The estimate for exp(b1) can be found in the second table, exp(coef) for prison = 0.9203. The lower and upper confidence limits are 0.4346 and 1.9603, respectively. If we did not recode the variable CLINIC the problem would have been more complicated in that we would have had to use variance–covariance matrix (which can be obtained with the vcov function) to calculate a 95% confidence interval for this hazard ratio.
-
-
-
-## 6. Obtaining Cox-adjusted survival curves.
-
-Adjusted survival curves generally depend on the pattern of covariates. Suppose we are interested in plotting the survival curve for the pattern PRISON=0, DOSE=70, and CLINIC=2.
+Next, we create a full model and run a backward selection.
 
 ```{r}
-pattern1=data.frame(prison=0,dose=70,clinic=2)
+# Define model variables
+modelVars <- cox_full_covariates$cofactors$non_violating
+selected_vars <- run_cox_backward_selection(df, modelVars)
+selected_vars
+```
+
+This result indicates that, after accounting for other candidate variables, only the presence of small cell type (ct3) showed a statistically significant association with survival. All other variables were removed during the backward selection process due to lack of evidence for predictive value in this dataset.
+
+
+## 6. Running a stratified Cox model.
+
+If the proportional hazards assumption is violated for the variable ct2 and perf but met for others, a stratified Cox model can be performed with ct2 and perf being the stratified variable. The coxph function includes a strata() option in the model formula.
+
+```{r}
+#cox_formula <- as.formula(paste0("Y", "~", paste(cox_full_covariates$cofactors$non_violating, collapse="+"),"+ strata(ct2)"))
+#coxph(cox_formula, data=df)
+
+# split up performance by median:
+
+df <- df %>%
+  mutate(perf_2class = if_else(perf > median(perf), "High", "Low"))
+
+
+# estimating the treatment effect per stratum ct2
+cox_strat <- coxph(Y ~ tx + ct1 + ct3 + dd + age + priortx + tx:ct2 + tx:perf_2class + strata(ct2) + strata(perf_2class), data=df)
+cox_strat
+```
+
+Suppose we wish to estimate the hazard ratio for treatment=test vs. treatment=standard for ct2=1. This hazard ratio can be estimated by exponentiating the coefficient for treatment plus 2 times the coefficient for the treatment\*ct2 interaction term. This expression is obtained by substituting the appropriate values into the hazard in both the numerator (for treatment=test) and denominator (for treatment=standard)
+
+In this example, we are interested in a hazard ratio treatment=test versus treatment=standard for ct2=1 (adeno). We can define a new variable adeno so when ct2=1, adeno=0.
+
+```{r}
+df$adeno <- df$ct2-1
+summary(coxph(Y ~ tx + ct1 + ct3 + dd + age + priortx + tx:adeno + tx:perf_2class + strata(adeno) + strata(perf_2class), data = df))
+#summary(coxph(Y ~ prison + dose + clinic2:prison + clinic2:dose + strata(clinic2),data=addicts))
+```
+
+The estimate for exp(b1) can be found in the second table, exp(coef) for txtest = 0.3479. The lower and upper confidence limits are 0.1068 and 1.133, respectively. If we did not recode the variable ct2 the problem would have been more complicated in that we would have had to use variance–covariance matrix (which can be obtained with the vcov function) to calculate a 95% confidence interval for this hazard ratio.
+
+## 7. Obtaining Cox-adjusted survival curves.
+
+Adjusted survival curves generally depend on the pattern of covariates. Suppose we are interested in plotting the survival curve for the pattern treatment=test, age=70, and ct3=1 (1: small, 0: other).
+
+```{r}
+#| message: false
+#| warning: false
+pattern1 <- data.frame(tx = "test", ct1 = 0, ct3 = 1, dd = 11, priortx = 0, age = 70)
 #summary(survfit(mod1,newdata=pattern1))
+cox_nonviolating <- coxph(Y ~ tx + ct1 + ct3 + dd + age + priortx, data=df)
 
-plot(survfit(mod1,newdata=pattern1),conf.int=F,main="Adjusted
-survival for prison=0, dose=70, clinic=2")
-```
+# Generate survival fit for the new data
+fit <- survfit(cox_nonviolating, newdata = pattern1, data = df)
 
-Stratified Cox adjusted survival curves can be obtained by first running a stratified Cox model (stratified by CLINIC):
+# Plot the survival curve without confidence intervals
+plot(fit, 
+     conf.int=F,
+     main="Adjusted survival for treatment=test, age=70, and ct3 small")
 
-```{r}
-mod3=coxph(Y ~ prison + dose + strata(clinic),data=addicts)
-```
-
-To obtain stratified Cox adjusted curves controlling for PRISON and DOSE, we create a one observation dataframe with the mean values of 0.46 for PRISON and 60.4 for DOSE:
-
-```{r}
-pattern2=data.frame(prison=.46,dose=60.40)
-plot(survfit(mod3,newdata=pattern2), conf.int=F, lty = c("solid",
-"dashed"), col=c("black","grey"), main="Survival curves for clinic, adjusted for prison and dose")
-legend("topright", c("Clinic 1","Clinic 2"), lty=c("solid","dashed"),
-col=c("black","grey"))
-```
-
-```{r}
-plot(survfit(mod3,newdata=pattern2), fun="cloglog", main=
-"Log-log curves for cinic, adjusted for prison and dose")
-```
-
-```{r}
-sum.mod3=summary(survfit(mod3,newdata=pattern2))
-sum.mod4=data.frame(sum.mod3$strata,sum.mod3
-$time,sum.mod3$surv)
-colnames(sum.mod4)=c("clinic","time","survival")
-clinic1=sum.mod4[sum.mod4$clinic=="clinic=1", ]
-clinic2=sum.mod4[sum.mod4$clinic=="clinic=2", ]
-
-plot(clinic1$time,log(-log(clinic1$survival)),xlab="survival
-time in days",ylab="log-log survival",xlim=c(0,800),col=
-"black",type="l",lty="solid", main="log-log curves stratified by
-clinic, adjusted for prison, dose")
-par(new=T)
-plot(clinic2$time,log(-log(clinic2$survival)),axes=F,xlab=
-"survival time in days",ylab="log-log survival",col="grey50",
-type="l",lty="dashed")
-legend("bottomright", c("Clinic 1", "Clinic 2"), lty = c("solid",
-"dashed"),col=c("black","grey50"))
-par(new=F)
-```
-
-## 7. Running an extended Cox model.
-
-```{r}
-addicts.cp=survSplit(addicts,cut=addicts$survt[addicts$status==1],
-end="survt", event="status",start="start",id="PATid")
-# The survSplit function creates multiple observations
-# for individuals at risk at multiple time points. The
-# dataset addicts.cp created above contains 18,708 observations
-# from the 238 observations in the addicts dataset
-```
-
-Suppose the PH assumption was violated for the variable DOSE and we were interested in defining a time-varying covariate as the product of DOSE and the natural log of time (SURVT). This variable can easily be defined if the dataset is in counting process form with time cutpoints at each event time.
-
-```{r}
-addicts.cp$logtdose=addicts.cp$dose*log(addicts.cp$survt)
-```
-
-We now have a new variable in the dataset (called LOGTDOSE= ln(DOSE)\*T) that varies over time. We print the dataset for one individual (id=106) who had an event at time=35 days.
-
-```{r}
-addicts.cp[addicts.cp$id==106,c("id","start","survt","status",
-"dose","logtdose")]
+# Plot the survival curve without confidence intervals
+ggsurvplot(fit,
+           conf.int = FALSE,
+           title = "Adjusted survival for treatment=test, age=70, and ct3 small")
 
 ```
 
-Next we run an extended Cox model including the predictors PRISON, DOSE, and CLINIC and the time-dependent variable LOGTDOSE:
+Stratified Cox adjusted survival curves can be obtained by first running a stratified Cox model (stratified by ct2):
 
 ```{r}
-coxph(Surv(addicts.cp$start,addicts.cp$survt,addicts.cp$status) ~
-prison + dose + clinic + logtdose + cluster(id),data=addicts.cp)
+cox_strat <- coxph(Y ~ tx + ct1 + ct3 + dd + age + priortx + strata(ct2), data = df)
+
+pattern2 <- data.frame(
+ tx = rep("test", 2),
+ ct1 = 0,
+ ct3 = 1,
+ dd = 11,
+ priortx = 0,
+ age = 70,
+ ct2 = c(0, 1), # two levels of ct2
+ perf_2class = rep("Low", 2)
+)
+
+fit2 <- survfit(cox_strat, newdata = pattern2, data = df)
+
+plot(fit2,
+ conf.int = FALSE,
+ lty = c("solid", "dashed"),
+ col = c("black", "grey"),
+ main = "Survival curves for ct2, adjusted for other covariates")
+
+legend("topright",
+ legend = c("ct2 = 0 (other)", "ct2 = 1 (adeno)"),
+ lty = c("solid", "dashed"),
+ col = c("black", "grey"))
+
+
+ggsurvplot(fit2,
+           conf.int = FALSE,
+           title = "Survival curves for ct2, adjusted for other covariates",
+           legend.labs = c("ct2 = 0 (other)", "ct2 = 1 (adeno)"),
+           legend.title = "ct2"
+           )
 
 ```
 
-The Wald test z statistic of 1.64 (p = 1.0e-01 or p=0.10) is not significant for LOGTDOSE, providing no evidence that the proportional hazards assumption is violated for DOSE.
+```{r}
+plot(fit2, fun="cloglog", 
+     main = "Log-log curves for ct2, adjusted for other covariates")
+ggsurvplot(
+        fit2,
+        data = df,
+        fun = "cloglog",
+        legend.labs = c("ct2 = 0 (other)", "ct2 = 1 (adeno)")
+      )
+```
 
-Next we run an extended Cox model with heaviside functions for CLINIC defined about the time cutpoint of 365 days.
+## 8. Running an extended Cox model to drill down on PH-violating covariates.
+
+### Model for time-dependent variable
+
+To assess potential violations of the proportional hazards (PH) assumption, particularly for the variable perf, we can employ an extended Cox model that allows for time-varying effects. This approach is necessary since prior tests suggested the PH assumption does not hold for perf.
+
+First, using survSplit(), we convert the dataset into counting process format, so that we can model time-dependent covariates. The new dataset, df.cp, contains multiple intervals per subject, split at each unique event time. For example, we increased the number of rows from 137 (original data) to 5959 (counting process data), as each individual's follow-up was split at event times for all individuals.
 
 ```{r}
-addicts.cp365=survSplit(addicts,cut=365,end="survt",
-event="status",start="start",id="PATid")
+df.cp <- survSplit(df,cut=df$survt[df$status==1], end="survt", event="status",start="start",id="uuid")
+# The survSplit function creates multiple observations for individuals at risk at multiple time points. The
+# dataset df.cp created above contains 5959 observations from the 137 observations in the veterans dataset
+```
+
+Next, we construct a time-dependent covariate, logt_perf, defined as the product of perf and the natural logarithm of time (SURVT): logt_perf=perf×log(survt)
+
+This variable allows the effect of perf to vary smoothly with (log) time.
+
+```{r}
+df.cp$logt_perf <- df.cp$perf*log(df.cp$survt)
+```
+
+We now have a new variable in the dataset (called logt_perf = ln(perf)\*T) that varies over time. We print the dataset for one individual (id=6) who had an event at time=10 days.
+
+```{r}
+df.cp[df.cp$uuid==6,]
+```
+
+We then fit an extended Cox model including logt_perf along with other baseline covariates (tx, ct1, ct3, dd, age, and priortx). The use of cluster(uuid) accounts for multiple rows per subject (robust standard errors):
+
+```{r}
+cox_extended <- coxph(Surv(df.cp$start,df.cp$survt,df.cp$status) ~ tx + ct1 + ct3 + dd + age + priortx + logt_perf + cluster(uuid),data=df.cp)
+cox_extended
+```
+
+The Wald test for logt_perf yields a z statistic of -4.170 (p = 3.04e-05), which is highly significant. This solidly rejects the null hypothesis that the effect of perf is constant over time. In other words, it confirms with strong evidence that the PH assumption for perf is violated, and its effect indeed varies with time. The negative coefficient suggests that the influence of perf on the hazard decreases as time goes on (since logt_perf becomes more negative as time increases, depending on the sign of perf).
+
+### Heaviside (Piecewise Constant) Model
+
+To further characterize how the effect of perf changes over time, we modeled it using Heaviside (step) functions, splitting the follow-up at a clinically meaningful cutpoint (100 days). By definition, Heaviside functions facilitate the estimation of separate hazard ratios for perf before and after 100 days:
+
+-   HV1: equals the value of perf_2class prior to 100 days, zero otherwise.
+-   HV2: equals the value of perf_2class at 100 days or later, zero otherwise.
+
+We fit the following model:
+
+```{r}
+cutpoint_days = 100
+df.cp_days <- survSplit(df,cut=cutpoint_days,end="survt", event="status",start="start",id="uuid")
 
 # Next we create the two timedependent
 # variables (HV1 and HV2). HV1 is defined to
-# equal the value of CLINIC if survival time is less than 365
+# equal the value of perf_2class if survival time is less than cutpoint_days
 # days and 0 otherwise. HV2 is defined to equal 0 if survival
-# time is less than 365 days and equal the value of CLINIC
+# time is less than cutpoint_days days and equal the value of perf_2class
 # otherwise
 
-addicts.cp365$hv1=addicts.cp365$clinic*(addicts.cp365$start<365)
-addicts.cp365$hv2=addicts.cp365$clinic*(addicts.cp365$start>=365)
+df.cp_days$hv1 <- ifelse(df.cp_days$start < cutpoint_days, df.cp_days$perf_2class, 0)
+df.cp_days$hv2 <- ifelse(df.cp_days$start >= cutpoint_days, df.cp_days$perf_2class, 0)
 
 # sort dataset:
-addicts.cp365=addicts.cp365[order(addicts.cp365$id,addicts.cp365$start), ]
-addicts.cp365[1:10,c("id", "start","survt","status","clinic","hv1","hv2")]
+df.cp_days <- df.cp_days[order(df.cp_days$df.cp_days, df.cp_days$start), ]
+df.cp_days[1:10,c("uuid", "start","survt","status","perf_2class","hv1","hv2")]
 ```
 
 ```{r}
-Y365 <- Surv(addicts.cp365$start,addicts.cp365$survt,
-addicts.cp365$status)
-coxph(Y365 ~ prison + dose + hv1 + hv2 + cluster(id),
-data=addicts.cp365)
+Ycp <- Surv(df.cp_days$start, df.cp_days$survt, df.cp_days$status)
+coxph(Ycp ~ tx + ct1 + ct3 + dd + age + priortx + hv1 + hv2 + cluster(uuid), data=df.cp_days)
 ```
 
-The estimated hazard ratio (CLINIC=2 vs. CLINIC=1) is 0.632 for days \<365 and 0.160 for days ≧365.
+he estimated hazard ratio (HR) for high vs. low perf_2class is 0.25 for days \< 100, and 1.37 for days ≥ 100. Before 100 days, high performance status is associated with a substantially lower hazard (better survival). After 100 days, the effect reverses, as high performance status is associated with a higher hazard (worse survival), although this estimate needs to be interpreted with caution, as the wider confidence intervals and potential instability due to fewer events after 100 days can apply.
 
-To run an equivalent model with one heaviside function, we need to include the CLINIC variable in the model
+We further confirm this by fitting a model that includes perf_2class and the two Heaviside variables as separate covariates. Here:
 
 ```{r}
-coxph(Y365 ~ prison + dose + clinic + hv2 + cluster
-(id),data=addicts.cp365)
+coxph(Ycp ~ perf_2class + tx + ct1 + ct3 + dd + age + priortx + hv1 + hv2 + cluster(uuid), data=df.cp_days)
 ```
 
-The coefficient estimates are different with this model compared to the model with two heaviside functions but the estimated hazard ratios are the same. The estimated hazard ratio (CLINIC=2 vs. CLINIC=1) is 0.632 for days \<365 (exponentiate the coefficient for CLINIC). In order to estimate the hazard ratio for days  365, we need to sum the coefficient estimates for CLINIC and HV2 and then exponentiate (exp(-0.4594 þ -1.3711)) = 0.160). The significant p-value for the estimated coefficient for HV2 of (p = 3.6e-10 or p = 0.0036) suggests that the hazard ratios for CLINIC for the two different time periods are not equal. In other words, the significant p-value provides evidence that the proportional hazard assumption is violated for CLINIC.
+The estimated hazard ratio is 0.72 for days \<100 (exponentiate the coefficient for perf). In order to estimate the hazard ratio for days \>= 100, we need to sum the coefficient estimates for perf and HV2 and then exponentiate (exp(-0.32 + -1.70)) = 0.13). The highly significant p-value for the estimated coefficient of HV1 (p = 6.82e-06) indicates that the hazard ratios for perf_2class are statistically significantly different before and after 100 days. This again provides clear evidence that the proportional hazards assumption for perf_2class does not hold in this dataset. The impact of performance status on survival is therefore not constant, but time-dependent.
 
-## 8. Running parametric models.
+## 9. Running parametric models.
 
-Whereas the key assumption of a proportional hazards (PH) model is that hazard ratios are constant over time, the key assumption for an accelerated failure time (AFT) model is that survival time accelerates (or decelerates) by a constant factor when comparing different levels of covariates.
+Parametric models, such as the exponential or Weibull models, offer an alternative to the semi-parametric Cox proportional hazards (PH) model. Unlike the Cox PH model—which assumes that hazard ratios between groups are constant over time—the key assumption of many parametric models is a specific form for the underlying hazard function. For example, the exponential model assumes a constant hazard over time. When the assumption of a constant hazard is plausible, the exponential model is an efficient and interpretable option. However, model diagnostics and comparisons (e.g., with semi-parametric or more flexible models like the Weibull) are critical to ensure that the chosen model fits the data well.
+
+-   Accelerated Failure Time (AFT) vs. Proportional Hazards (PH) Proportional Hazards (PH) Model: Assumes hazard ratios for covariates are constant over follow-up time.
+
+-   Accelerated Failure Time (AFT) Model: Assumes covariates either accelerate or decelerate the time to the event by a multiplicative factor, changing the expected survival time directly.
+
+In R, the survreg function fits AFT models, and parameters from this model can be restated in PH language by flipping the sign.
+
+### Exponential
 
 ```{r}
 # check if log-log curves look straight, so that Weibull distribution assumption is appropriate:
-plot(survfit(Y ~ addicts$clinic), fun="cloglog",xlab="time in days using logarithmic scale",ylab="log-log survival", main="log-log curves by clinic")
+plot(survfit(Y ~ df$tx), fun="cloglog",xlab="time in days using logarithmic scale",ylab="log-log survival", main="log-log curves by treatment")
 ```
 
 ```{r}
-# The log–log curves in Section 2 do not look straight but for
-# illustration, we shall proceed as if the Weibull assumption
-# were appropriate. First an exponential model is run with
-# the survreg function. In this model, the Weibull shape
-# parameter (p) is forced to equal 1, which forces the hazard
-# to be constant. We’ll save the results in an object called
+# First an exponential model is run with the survreg function. In this model, the Weibull shape
+# parameter (p) is forced to equal 1, which forces the hazard to be constant. We’ll save the results in an object called
 # modpar1:
 
-modpar1=survreg(Surv(addicts$survt,addicts$status) ~ prison + dose + clinic,data=addicts,dist="exponential")
+modpar1 <- survreg(Y ~ tx + ct1 + ct3 + ct4 + dd + age + priortx, data=df, dist="exponential")
 summary(modpar1)
 ```
 
-The key assumption of an exponential model is that the hazard is constant over time. This is indicated in the output by the statement “Scale fixed at 1” listed under the tables of parameter estimates. The output can be used to estimate the hazard ratio for any subject given a pattern of covariates. Note that R outputs the parameter estimates for the AFT form of the exponential model. Multiply the estimated coefficients by one to get estimates consistent with the PH parameterization of the model (see Chapter. 7). For example, the estimated hazard ratio comparing PRISON=1 vs PRISON=0 is exp(0.2526) = 1.29. The corresponding acceleration factor for an exponential model is just the reciprocal of the hazard ratio, exp(- 0.2526) = 0.78. Having a prison record accelerates the time to event by a factor of 0.78.
+The exponential model assumes that patients' hazards are constant over time and are determined by the linear combination of covariates:
+
+-   Each estimated coefficient in survreg is given in the AFT parameterization (i.e., modeling direct effects on survival time).
+-   For comparison with Cox/PF models (which model direct effects on the hazard), PH coefficients are the negatives of the AFT coefficients.
+
+**Covariate Effects** - tx (treatment group): Coefficient: -0.136, p=0.495 (not significant). Compared to the reference (standard treatment), the "test" treatment group is associated with a modestly shorter survival time, but this result is not statistically significant. In PH terms, exp(+0.136) ≈ 1.15 (HR), a slight increase in hazard with test treatment, but again, not significant.
+
+-   ct1, ct3, ct4: ct1: Coefficient = +0.925, p = 0.0013 (significant). Cell type 1 (1: large, 0: other) is associated with longer survival times compared to reference; in PH terms, lowers relative hazard.
+-   ct4: Coefficient = +1.233, p \< 0.001 (highly significant). Cell type 4 (1: squamous, 0: other) is associated with much longer survival times.
+-   dd (drug dose), age, priortx: All not statistically significant.
+
+**Hazard ratios and Acceleration factors:**
+
+-   PH hazard ratios: For each unit change in X, the hazard is multiplied by exp(-coef). For example, for tx, the hazard ratio for test vs standard: exp(-(-0.136)) = exp(0.136) ≈ 1.15.
+-   AFT acceleration factors: For each unit change in X, survival time is multiplied by exp(coef). For example, acceleration factor for tx=test is exp(-0.136) ≈ 0.87, which indicates time to event is about 87% as long as for standard tx (i.e., failure is modestly accelerated), but confidence intervals include 1 (no effect).
+
+The key assumption of an exponential model is that the hazard is constant over time. This is indicated in the output by the statement “Scale fixed at 1” listed under the tables of parameter estimates. The output can be used to estimate the hazard ratio for any subject given a pattern of covariates. In this exponential model, "Scale fixed at 1" means the Weibull shape parameter p=1, so the hazard function is forced to be constant over time—a strong assumption that should be checked (e.g., via graphical or goodness-of-fit residuals).
+
+Comparisons to Cox Model: The exponential model gives similar HR estimates to the Cox PH model for many covariates, but its validity depends on the constant hazard rate being a good fit. If the hazard is not constant (as may be diagnosed via Schoenfeld residuals or log-log plots), then the exponential model may not be appropriate.
+
+PH vs AFT modeling: The AFT model directly describes how covariates stretch or shrink expected survival, which can be more interpretable for lay audiences. The PH model is often preferred for flexibility (since it does not need a prespecified hazard shape) and eases checking of the PH assumption.
+
+Note that R reports parameter estimates for the accelerated failure time (AFT) parameterization in the exponential model. To interpret these in terms of proportional hazards (PH), one must take the negative of the coefficient and exponentiate it to obtain the hazard ratio (HR). For example, if the AFT coefficient for tx = test is -0.136, the hazard ratio is calculated as exp(-(-0.136)) = exp(0.136) ≈ 1.15.
+
+Correspondingly, the acceleration factor (from the AFT model) is exp(-0.136) ≈ 0.87. This means that, holding other variables constant, the median survival time for the test group is about 87% that of the standard group (i.e., survival is modestly shorter, though this difference is not statistically significant, p = 0.495).
+
+For other covariates such as ct1 with a coefficient of 0.925, the hazard ratio is exp(-0.925) ≈ 0.40, indicating a substantial reduction in hazard compared to the reference group, which corresponds to an acceleration factor of exp(0.925) ≈ 2.52, or a more than doubling of the expected survival time.
+
+In summary:
+
+-   A positive AFT coefficient \>1 (as for ct1 or ct4) = longer survival time, lower hazard (HR \< 1).
+-   A negative AFT coefficient (as for txtest) = reduced survival time, higher hazard (HR \> 1).
+-   Hazard Ratio (PH interpretation): HR = exp(-coefficient)
+-   Acceleration Factor (AFT interpretation): AF = exp(coefficient)
+
+These translations help interpret the output of parametric models in the commonly used language of hazard ratios while maintaining the meaningful time-based interpretation of AFT models.
+
+Reference: See Chapter 7 in Kleinbaum & Klein for further explanation of these conversions.
+
+### Weibull
+
+The Weibull model is a flexible, parametric approach to survival analysis that extends the exponential model by allowing the hazard rate to increase or decrease over time. Unlike the exponential model—which assumes a constant hazard—the Weibull model introduces a shape parameter that can accommodate different hazard patterns commonly seen in real data.
 
 ```{r}
-modpar2=survreg(Surv(addicts$survt,addicts$status)
-~ prison + dose + clinic,data=addicts,dist="weibull")
+modpar2 <- survreg(Y ~ tx + ct1 + ct3 + ct4 + dd + age + priortx, data=df, dist="weibull")
 summary(modpar2)
-
 ```
 
-The Weibull shape parameter is the reciprocal of what R calls the Scale parameter (estimated at 0.73). An estimate for the Weibull shape parameter can be obtained by taking the reciprocal, 1/0.73 = 1.37. The acceleration factor comparing CLINIC=2 to CLINIC=1 is estimated at exp(0.7090) = 2.03. So, the estimated median survival time (time off heroin) is double for patients enrolled in CLINIC=2 compared to CLINIC=1.
+The Weibull shape parameter is the reciprocal of what R calls the Scale parameter (estimated at 1.02). An estimate for the Weibull shape parameter can be obtained by taking the reciprocal, 1/1.02 = 0.98. A Weibull shape parameter ≈ 1 means the hazard is approximately constant over time (as in the exponential distribution). If the shape \> 1, hazard increases over time; if shape \< 1, hazard decreases over time.
 
-We can use the model results and the predict function to estimate the median (or any other quantile) time to event for any specified pattern of covariates. For example, we can obtain the 25th, 50th, and 75th percentile of survival time estimated from the Weibull model results that we saved in the object modpar2 for an individual who has the covariate pattern PRISON=1, DOSE=50, and CLINIC=1.
+The acceleration factor comparing treatments is estimated at exp(-0.14) = 0.86. So, the median survival time is slightly shorter for the test treatment, but this is not statistically significant.
+
+We can use the model results and the predict function to estimate the median (or any other quantile) time to event for any specified pattern of covariates. For example, we can obtain the 25th, 50th, and 75th percentile of survival time estimated from the Weibull model results that we saved in the object modpar2 for an individual who has the defined covariate pattern:
 
 ```{r}
-pattern1=data.frame(prison=1,dose=50,clinic=1)
+pattern3 <- data.frame(tx = "test", ct1 = 0, ct3 = 1, ct4 = 0, dd = 11, priortx = 0, age = 70)
 pct=c(.25,.50,.75)
-days=predict(modpar2,newdata=pattern1,type="quantile",p=pct)
-cbind(pct,days)
+days=predict(modpar2, newdata=pattern3, type="quantile", p=pct)
+cbind(pct, days)
 ```
 
-The estimated median survival time is 254.2196 days.
+The estimated median survival time is 43 days.
 
 ```{r}
-pct2=0:100/100
-days2=predict(modpar2,newdata=pattern1,
-type="quantile",p=pct2)
-survival=1-pct2
+pct2 <- seq(0,1,by=0.01)
+# Use the fitted Weibull model ('modpar2') to predict the quantiles (i.e., survival times)
+# for the specified percentiles for a given patient profile (pattern3).
+# "type = 'quantile'" tells R to return the estimated time by which a given proportion
+# (pct2) of the patient population would have experienced the event.
+days2 <- predict(modpar2, newdata = pattern3, type = "quantile", p = pct2)
+
+# Calculate survival probabilities as 1 minus the cumulative event probability (i.e., survivor function).
+survival <- 1 - pct2
+
+# Plot predicted survival curve:
+# X-axis is survival time in days, Y-axis is survival probability (0 to 1).
 plot(days2,survival,xlab="survival time in days",ylab= "survival
-probabilities",main="Weibull survival estimates for prison=0,
-dose=40,clinic=1",xlim=c(0,800))
+probabilities",main="Weibull survival estimates for specific patient",xlim=c(0,800))
 ```
 
-Next a log-logistic AFT model is run with the survreg function.
+### Log-logistic AFT model
+
+After fitting exponential and Weibull models, we consider the log-logistic model as another flexible parametric approach to survival analysis. The log-logistic AFT model is particularly useful when the hazard rate is not monotonic—that is, when the risk of an event may increase and then decrease over time, a pattern not captured by exponential or Weibull models.
+
+In R, the log-logistic model can be fit using the survreg function by specifying dist = "loglogistic". Like other AFT models, the log-logistic model directly relates covariates to survival time through a multiplicative (acceleration) factor. The model can provide better fit and more realistic estimates when the survival data display non-constant hazard rates or a "peaked" hazard function.
 
 ```{r}
-modpar3=survreg(Surv(addicts$survt,addicts$status) ~
-prison + dose + clinic,data=addicts,dist="loglogistic")
+modpar3 <- survreg(Y ~ tx + ct1 + ct3 + ct4 + dd + age + priortx, data = df, dist="loglogistic")
 summary(modpar3)
 ```
 
-From this output, the acceleration factor comparing CLINIC=2 to CLINIC=1 is estimated as exp(0.5806) = 1.79. If the AFT assumption holds for a log logistic model, then the proportional odds assumption holds for the survival function (although the PH assumption will not hold). The proportional odds assumption can be evaluated by plotting the log odds of survival (using KM estimates) against the log of survival time. If the plots look like straight lines for each pattern of covariates then the log logistic distribution is reasonable. If the straight lines are also parallel then the proportional odds and AFT assumptions also hold.
+The log-logistic AFT model fits the data well and finds that cell is a strong determinant of survival time, with ct1 and ct4 associated with much longer survival compared to the reference. There is no evidence of a significant effect of treatment group (txtest), dose, age, or prior treatment on survival time in this model. From this output, the acceleration factor comparing treatment=test to treatment=standard is estimated as exp(-0.21) = 0.81.
+
+Interpretation of coefficients: Acceleration factor exp(coefficient): - Values greater than 1 = increased expected survival time. - Values less than 1 = decreased expected survival time.
+
+The log-logistic model is especially useful when the hazard is expected to peak and then decline, offering a different perspective than the exponential or Weibull models.
+
+If the accelerated failure time (AFT) assumption is true for a log-logistic model, this also means that the survival function follows the proportional odds assumption, even though the proportional hazards assumption does not hold. To check the proportional odds assumption, you can plot the log odds of survival (estimated from Kaplan-Meier curves) against the logarithm of survival time for different groups. If the points form straight lines, the log-logistic model fits the data well. If those straight lines are also parallel across groups, then both the proportional odds and AFT assumptions are likely reasonable for your data.
 
 ```{r}
-kmfit2=survfit(Surv(addicts$survt,addicts$status) ~ addicts$clinic)
+kmfit2 <- survfit(Y ~ df$tx)
 plot(log(kmfit2$time),log(kmfit2$surv/(1-kmfit2$surv)))
 ```
 
-The curves do not look like straight lines or parallel so the proportional odds assumption for CLINIC looks to be violated. We had run the log-logisticmodel earlier for illustration, even though the graph suggests that it is not the appropriate model.
-
 Other distributions supported by the survreg function are the normal (dist=”gaussian”) and the lognormal (dist=”lognormal”) distributions.
 
-## 9. Running frailty models.
+## 10. Running frailty models.
 
-Frailty models contain an extra random component designed to account for individual-level differences in the hazard otherwise unaccounted for by the model. The frailty, a, is a multiplicative effect on the hazard assumed to follow some distribution.
+Frailty models are a type of survival model that introduce a random effect ("frailty") to account for unobserved heterogeneity or clustering in the data. Frailty models contain an extra random component designed to account for individual-level differences in the hazard otherwise unaccounted for by the model. The frailty, a, is a multiplicative effect on the hazard assumed to follow some distribution. They are most useful when you suspect that:
+
+-   Some subjects share a risk factor that is not measured in your dataset,
+-   Or subjects are grouped (nested) within clusters (such as patients within hospitals, families, or geographic units), resulting in correlated survival times within each cluster.
+
+Frailty models are ideal if your data are organized into clusters (e.g., patients within clinics, families, or regions) and you want to model the potential dependence among survival times within clusters, after accounting for observed covariates. Also, if there are important (unmeasured) risk factors that might cause survival times to be more similar within some unknown subgroups, a frailty model can help absorb that extra variability and improve your inferences.
 
 R offers three choices for the distribution of the frailty: the gamma, Gaussian, and t distributions. The variance (theta) of the frailty component is a parameter typically estimated by the model. If theta = 0, then there is no frailty.
 
 ```{r}
-# base model:
-Y=Surv(addicts$survt,addicts$status==1)
-#coxph(Y ~ prison + dose + strata(clinic),data=addicts)
 # frailty model:
-coxph(Y ~ prison + dose + strata(clinic) + frailty(id, distribution="gamma"), data=addicts)
-
+df$id <- rownames(df)
+coxph(Y ~ tx + ct1 + ct3 + ct4 + dd + age + frailty(priortx, distribution="gamma"), data=df)
 ```
 
-Under the table of parameter estimates the output indicates that the variance of random effect = 0.00227. The pvalue for the frailty component of 3.1e-01= 0.31 is provided in the third row and right column of the table and indicates that the frailty component is not significant. We conclude that the variance of the random component is zero for this model (i.e., there is no frailty). The parameter estimates for PRISON and DOSE changed minimally in this model compared to the model previously run without the frailty.
+Under the table of parameter estimates the output indicates that the variance of random effect = 5e-07. The pvalue for the frailty component of 0.97 is provided in the third row and right column of the table and indicates that the frailty component is not significant. We conclude that the variance of the random component is zero for this model (i.e., there is no frailty).
 
-Now, suppose the variable CLINIC was unmeasured. If CLINIC was unaccounted for, there may be a source of unobserved heterogeneity that a frailty component might address. The next model omits CLINIC but includes a frailty component and the predictors PRISON and DOSE.
+Now, suppose some important variables were unmeasured. If these variables were unaccounted for, there may be a source of unobserved heterogeneity that a frailty component might address. The next model omits several cofactors but includes a frailty component.
 
 ```{r}
-summary(coxph(Y ~ prison + dose + frailty(id, distribution="gamma"), data=addicts))
+#summary(coxph(Y ~ prison + dose + frailty(id, distribution="gamma"), data=addicts))
+summary(coxph(Y ~ age  + frailty(priortx, distribution="gamma"), data=df))
 ```
 
-The p-value for the frailty is highly significant at 8.6e–3. In this example, the frailty component might be accounting to some extent for the fact that CLINIC was omitted from the model.
+The p-value for the frailty term is not significant, and its estimated variance is close to zero. This suggests that survival times within clusters are not more similar than would be expected by chance, indicating minimal unobserved heterogeneity at the cluster level. This may be because the clusters (the group variable used in the frailty term) do not share substantial unmeasured risk factors that influence survival.
+
+If the frailty term were significant, it could indicate that there are important shared risks within clusters that are not captured by the observed covariates—possibly because relevant variables have been omitted from the model. In other words, a significant frailty effect would suggest that accounting for unmeasured cluster-level factors helps explain survival differences.
 
 ## References
 
-[1] Kleinbaum & Klein "Survival Analysis" (https://doi.org/10.1007/978-1-4419-6646-9)
+\[1\] Kleinbaum & Klein "Survival Analysis" (https://doi.org/10.1007/978-1-4419-6646-9)
 
-[2] Travis WD, Brambilla E, Nicholson AG, Yatabe Y, Austin JHM, Beasley MB, Chirieac LR, Dacic S, Duhig E, Flieder DB, Geisinger K, Hirsch FR, Ishikawa Y, Kerr KM, Noguchi M, Pelosi G, Powell CA, Tsao MS, Wistuba I; WHO Panel. The 2015 World Health Organization Classification of Lung Tumors: Impact of Genetic, Clinical and Radiologic Advances Since the 2004 Classification. J Thorac Oncol. 2015 Sep;10(9):1243-1260. doi: 10.1097/JTO.0000000000000630. PMID: 26291008.
+\[2\] Travis WD, Brambilla E, Nicholson AG, Yatabe Y, Austin JHM, Beasley MB, Chirieac LR, Dacic S, Duhig E, Flieder DB, Geisinger K, Hirsch FR, Ishikawa Y, Kerr KM, Noguchi M, Pelosi G, Powell CA, Tsao MS, Wistuba I; WHO Panel. The 2015 World Health Organization Classification of Lung Tumors: Impact of Genetic, Clinical and Radiologic Advances Since the 2004 Classification. J Thorac Oncol. 2015 Sep;10(9):1243-1260. doi: 10.1097/JTO.0000000000000630. PMID: 26291008.
